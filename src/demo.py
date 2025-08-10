@@ -24,38 +24,83 @@ from langchain.prompts import PromptTemplate
 class PerformanceTracker:
     def __init__(self):
         self.metrics = {}
+        self.current_process = psutil.Process()  # 현재 프로세스 객체 저장
+        
+    def get_ollama_processes(self):
+        """Ollama 관련 프로세스들을 찾아서 반환"""
+        ollama_processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'cpu_percent']):
+            try:
+                if 'ollama' in proc.info['name'].lower():
+                    ollama_processes.append(proc)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return ollama_processes
+    
+    def get_total_memory_usage(self):
+        """현재 프로세스 + Ollama 프로세스들의 총 메모리 사용량"""
+        # 현재 Python 프로세스 메모리
+        python_memory = self.current_process.memory_info().rss / 1024 / 1024
+        
+        # Ollama 프로세스들 메모리
+        ollama_memory = 0
+        ollama_processes = self.get_ollama_processes()
+        for proc in ollama_processes:
+            try:
+                ollama_memory += proc.memory_info().rss / 1024 / 1024
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+                
+        return {
+            'python_memory': python_memory,
+            'ollama_memory': ollama_memory,
+            'total_memory': python_memory + ollama_memory,
+            'ollama_process_count': len(ollama_processes)
+        }
         
     def start_timer(self, task_name):
-        """작업 시작 시간 기록"""
+        """작업 시작 시간 기록 (개선된 버전)"""
+        memory_info = self.get_total_memory_usage()
         self.metrics[task_name] = {
             'start_time': time.time(),
-            'start_memory': psutil.Process().memory_info().rss / 1024 / 1024  # MB
+            'start_python_memory': memory_info['python_memory'],
+            'start_ollama_memory': memory_info['ollama_memory'],
+            'start_total_memory': memory_info['total_memory'],
+            'start_cpu_percent': self.current_process.cpu_percent()  # 현재 프로세스의 CPU 사용률
         }
         
     def end_timer(self, task_name):
-        """작업 종료 시간 기록 및 결과 반환"""
+        """작업 종료 시간 기록 및 결과 반환 (개선된 버전)"""
         if task_name in self.metrics:
             end_time = time.time()
-            end_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+            memory_info = self.get_total_memory_usage()
             
             self.metrics[task_name].update({
                 'end_time': end_time,
-                'end_memory': end_memory,
+                'end_python_memory': memory_info['python_memory'],
+                'end_ollama_memory': memory_info['ollama_memory'],
+                'end_total_memory': memory_info['total_memory'],
                 'duration': end_time - self.metrics[task_name]['start_time'],
-                'memory_used': end_memory - self.metrics[task_name]['start_memory']
+                'python_memory_used': memory_info['python_memory'] - self.metrics[task_name]['start_python_memory'],
+                'ollama_memory_used': memory_info['ollama_memory'] - self.metrics[task_name]['start_ollama_memory'],
+                'total_memory_used': memory_info['total_memory'] - self.metrics[task_name]['start_total_memory'],
+                'ollama_process_count': memory_info['ollama_process_count']
             })
             
             return self.metrics[task_name]
         return None
     
     def get_summary(self):
-        """전체 성능 요약 반환"""
+        """전체 성능 요약 반환 (개선된 버전)"""
         summary = {}
         for task, metrics in self.metrics.items():
             if 'duration' in metrics:
                 summary[task] = {
                     '실행시간 (초)': round(metrics['duration'], 2),
-                    '메모리 사용량 (MB)': round(metrics['memory_used'], 2),
+                    'Python 메모리 (MB)': round(metrics['python_memory_used'], 2),
+                    'Ollama 메모리 (MB)': round(metrics['ollama_memory_used'], 2),
+                    '총 메모리 (MB)': round(metrics['total_memory_used'], 2),
+                    'Ollama 프로세스 수': metrics['ollama_process_count'],
                     '완료시간': datetime.fromtimestamp(metrics['end_time']).strftime('%H:%M:%S')
                 }
         return summary
@@ -212,13 +257,15 @@ with st.sidebar:
                 st.write("**처리 시간 분석:**")
                 
                 for task, metrics in perf_summary.items():
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.metric(f"{task}", f"{metrics['실행시간 (초)']}초")
                     with col2:
-                        st.metric("메모리 사용", f"{metrics['메모리 사용량 (MB)']}MB")
+                        st.metric("Python 메모리", f"{metrics['Python 메모리 (MB)']}MB")
                     with col3:
-                        st.metric("완료 시간", metrics['완료시간'])
+                        st.metric("Ollama 메모리", f"{metrics['Ollama 메모리 (MB)']}MB")
+                    with col4:
+                        st.metric("총 메모리", f"{metrics['총 메모리 (MB)']}MB")
                 
         else:
             st.error("PDF 파일을 업로드해주세요.")
@@ -238,23 +285,36 @@ if show_performance and hasattr(st.session_state, 'performance_tracker'):
         if perf_summary:
             st.subheader("전체 작업 요약")
             total_time = sum(metrics['실행시간 (초)'] for metrics in perf_summary.values())
-            total_memory = sum(metrics['메모리 사용량 (MB)'] for metrics in perf_summary.values())
+            total_python_memory = sum(metrics['Python 메모리 (MB)'] for metrics in perf_summary.values())
+            total_ollama_memory = sum(metrics['Ollama 메모리 (MB)'] for metrics in perf_summary.values())
+            total_memory = sum(metrics['총 메모리 (MB)'] for metrics in perf_summary.values())
             
             st.metric("총 처리 시간", f"{total_time:.2f}초")
-            st.metric("총 메모리 사용", f"{total_memory:.2f}MB")
+            st.metric("Python 메모리 총합", f"{total_python_memory:.2f}MB")
+            st.metric("Ollama 메모리 총합", f"{total_ollama_memory:.2f}MB")
+            st.metric("전체 메모리 총합", f"{total_memory:.2f}MB")
             
             # 가장 오래 걸린 작업
             if perf_summary:
                 slowest_task = max(perf_summary.items(), key=lambda x: x[1]['실행시간 (초)'])
                 st.metric("가장 느린 작업", f"{slowest_task[0]}: {slowest_task[1]['실행시간 (초)']}초")
         
-        # 현재 시스템 정보
-        st.subheader("시스템 정보")
-        current_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # 현재 시스템 정보 (개선된 버전)
+        st.subheader("실시간 시스템 정보")
+        memory_info = st.session_state.performance_tracker.get_total_memory_usage()
+        cpu_percent = psutil.cpu_percent(interval=0.1)  # 0.1초로 단축
         
-        st.metric("현재 메모리", f"{current_memory:.1f}MB")
-        st.metric("CPU 사용률", f"{cpu_percent:.1f}%")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Python 프로세스", f"{memory_info['python_memory']:.1f}MB")
+            st.metric("Ollama 프로세스", f"{memory_info['ollama_memory']:.1f}MB")
+        with col2:
+            st.metric("총 메모리 사용", f"{memory_info['total_memory']:.1f}MB")
+            st.metric("시스템 CPU 사용률", f"{cpu_percent:.1f}%")
+            
+        # Ollama 프로세스 정보
+        if memory_info['ollama_process_count'] > 0:
+            st.info(f"🤖 활성 Ollama 프로세스: {memory_info['ollama_process_count']}개")
 
 if prompt := st.chat_input("질문을 입력하세요."):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -278,12 +338,15 @@ if prompt := st.chat_input("질문을 입력하세요."):
                 # 성능 정보 표시
                 if show_performance and qa_metrics:
                     with st.expander("⚡ 응답 성능 정보"):
-                        perf_col1, perf_col2 = st.columns(2)
+                        perf_col1, perf_col2, perf_col3 = st.columns(3)
                         with perf_col1:
                             st.metric("응답 시간", f"{qa_metrics['duration']:.2f}초")
                             st.metric("완료 시간", datetime.fromtimestamp(qa_metrics['end_time']).strftime('%H:%M:%S'))
                         with perf_col2:
-                            st.metric("메모리 사용", f"{qa_metrics['memory_used']:.2f}MB")
+                            st.metric("Python 메모리", f"{qa_metrics['python_memory_used']:.2f}MB")
+                            st.metric("Ollama 메모리", f"{qa_metrics['ollama_memory_used']:.2f}MB")
+                        with perf_col3:
+                            st.metric("총 메모리 사용", f"{qa_metrics['total_memory_used']:.2f}MB")
                             # 대략적인 처리 속도 계산
                             if qa_metrics['duration'] > 0:
                                 chars_per_sec = len(prompt) / qa_metrics['duration']

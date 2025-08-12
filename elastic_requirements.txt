@@ -1,0 +1,24 @@
+# 환경 변수 로드
+python-dotenv
+
+# Elasticsearch 파이썬 클라이언트
+elasticsearch>=8.0.0
+
+# LangChain 및 확장
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-text-splitters>=0.2.0
+
+# OpenAI API
+langchain-openai>=0.1.0
+openai>=1.0.0
+
+# Google Generative AI API
+langchain-google-genai>=0.1.0
+google-generativeai>=0.3.0
+
+# PDF 로더
+pypdf
+
+# 기타 유틸
+tqdm

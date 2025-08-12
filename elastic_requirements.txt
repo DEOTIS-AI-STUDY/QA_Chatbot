@@ -3,6 +3,7 @@ python-dotenv
 
 # Elasticsearch 파이썬 클라이언트
 elasticsearch>=8.0.0
+langchain-elasticsearch
 
 # LangChain 및 확장
 langchain>=0.2.0

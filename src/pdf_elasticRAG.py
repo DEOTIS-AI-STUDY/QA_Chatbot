@@ -21,7 +21,7 @@ from langchain_community.document_loaders import PyPDFLoader  # [TEXT-ONLY]
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.vectorstores import ElasticVectorSearch
+from langchain_elasticsearch import ElasticsearchStore
 
 # 실행 모드
 MODE_GOOGLE = False
@@ -52,7 +52,7 @@ INDEX_NAME = os.getenv("INDEX_NAME", "pdf_rag")
 # ===== CLI =====
 parser = argparse.ArgumentParser(description="PDF RAG (텍스트만 → ES 벡터 색인/질의)")
 parser.add_argument("--q", dest="query", type=str, help="질의 텍스트")
-parser.add_argument("--k", dest="top_k", type=int, default=9999, help="검색 상위 k (기본 8)")
+parser.add_argument("--k", dest="top_k", type=int, default=1000, help="검색 상위 k (기본 8)")
 args = parser.parse_args()
 
 query_mode = args.query is not None
@@ -148,10 +148,10 @@ if not query_mode:
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     else:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-    ElasticVectorSearch.from_documents(
+    ElasticsearchStore.from_documents(
         all_documents,
         embedding=embeddings,
-        elasticsearch_url=ELASTICSEARCH_URL,
+        es_url=ELASTICSEARCH_URL,
         index_name=INDEX_NAME,
     )
 
@@ -167,13 +167,13 @@ else:
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     else:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-    vectorstore = ElasticVectorSearch(
+    vectorstore = ElasticsearchStore(
         embedding=embeddings,
-        elasticsearch_url=ELASTICSEARCH_URL,
+        es_url=ELASTICSEARCH_URL,
         index_name=INDEX_NAME,
     )
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": top_k,"fetch_k": min(top_k * 3, 10000)})
     docs = retriever.invoke(query_text)
     # print_sources(docs)
 

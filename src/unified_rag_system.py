@@ -67,6 +67,7 @@ from langchain.prompts import PromptTemplate
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
 INDEX_NAME = os.getenv("INDEX_NAME", "unified_rag")
 PDF_DIR = os.getenv("PDF_DIR", "pdf")
+LANGCHAIN_ENDPOINT = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
 
 # BGE-M3 임베딩 모델 설정
 BGE_MODEL_NAME = "BAAI/bge-m3"
@@ -720,6 +721,16 @@ def main():
     st.title("🚀 통합 RAG 시스템")
     st.markdown("**BGE-M3 임베딩 + Elasticsearch + 멀티 LLM + 성능 모니터링**")
     
+    # 상단 네비게이션 바 추가
+    col_nav1, col_nav2, col_nav3 = st.columns([3, 1, 1])
+    
+
+    with col_nav2:
+        # 추가 네비게이션 공간 (필요시 확장 가능)
+        st.empty()
+    
+    st.divider()
+    
     # 세션 상태 초기화
     if "hybrid_tracker" not in st.session_state:
         st.session_state.hybrid_tracker = HybridPerformanceTracker()
@@ -748,12 +759,62 @@ def main():
             st.error(f"❌ Elasticsearch: {es_message}")
             st.stop()
         
-        # Langsmith 상태
-        langsmith_status = st.session_state.hybrid_tracker.get_langsmith_status()
-        if langsmith_status['enabled']:
-            st.success(f"✅ Langsmith: {langsmith_status['project']}")
+        # Langsmith 상태 실시간 확인
+        _, langsmith_enabled = setup_langsmith()
+        langsmith_project = os.getenv("LANGSMITH_PROJECT", "unified-rag-system")
+        
+        if langsmith_enabled:
+            st.success(f"✅ Langsmith: {langsmith_project}")
+            
+            # LangSmith 관리 섹션
+            with st.expander("📊 LangSmith 관리(소유자만)"):
+                langsmith_url = "https://smith.langchain.com"
+                
+                st.markdown(f"""
+                **프로젝트:** `{langsmith_project}`  
+                **상태:** 🟢 활성화됨
+                """)
+                
+                col_ls1, col_ls2 = st.columns(2)
+                with col_ls1:
+                    if st.button("📈 대시보드", key="langsmith_dashboard"):
+                        st.markdown(f'<meta http-equiv="refresh" content="0; url={langsmith_url}">', unsafe_allow_html=True)
+                        st.info(f"LangSmith 대시보드로 이동: {langsmith_url}")
+                
+                with col_ls2:
+                    if st.button("🔗 링크 복사", key="copy_langsmith_link"):
+                        st.code(langsmith_url)
+                        st.success("링크가 표시되었습니다!")
+                
+                st.markdown("**주요 기능:**")
+                st.write("• 실시간 추론 추적")
+                st.write("• 성능 메트릭 분석")
+                st.write("• 오류 디버깅")
+                st.write("• 비용 모니터링")
         else:
             st.info("📊 Langsmith: 비활성화")
+            
+            with st.expander("📊 LangSmith 설정"):
+                # API 키 확인
+                api_key = os.getenv("LANGSMITH_API_KEY") or st.secrets.get("LANGSMITH_API_KEY", "")
+                if api_key:
+                    st.warning("⚠️ API 키는 설정되어 있지만 LangSmith 라이브러리를 불러올 수 없습니다.")
+                    st.info("💡 `pip install langsmith` 명령으로 LangSmith를 설치하세요.")
+                else:
+                    st.markdown("""
+                    **LangSmith 활성화 방법:**
+                    1. LangSmith API 키 발급
+                    2. .env 파일에 추가:
+                    ```
+                    LANGSMITH_API_KEY=your_api_key
+                    LANGSMITH_PROJECT=your_project_name
+                    ```
+                    3. 애플리케이션 재시작
+                    """)
+                
+                if st.button("🌐 LangSmith 웹사이트", key="langsmith_website"):
+                    st.markdown('<meta http-equiv="refresh" content="0; url=https://smith.langchain.com">', unsafe_allow_html=True)
+                    st.info("LangSmith 웹사이트: https://smith.langchain.com")
         
         st.divider()
         
@@ -1224,6 +1285,7 @@ def main():
                 st.subheader("🎯 최적화 추천")
                 for rec in recommendations:
                     st.write(f"• {rec}")
+            
 
 if __name__ == "__main__":
     main()

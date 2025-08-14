@@ -37,30 +37,20 @@ except ImportError as e:
 
 # 조건부 import - 오류 발생시 None으로 설정
 try:
-    from langchain_upstage import ChatUpstage, UpstageEmbeddings
+    from langchain_upstage import ChatUpstage
     UPSTAGE_AVAILABLE = True
 except ImportError as e:
     print(f"Upstage 라이브러리 로딩 실패: {e}")
     ChatUpstage = None
-    UpstageEmbeddings = None
     UPSTAGE_AVAILABLE = False
 
 try:
-    from langchain_ollama import OllamaLLM, ChatOllama
+    from langchain_ollama import ChatOllama
     OLLAMA_AVAILABLE = True
 except ImportError as e:
     print(f"Ollama 라이브러리 로딩 실패: {e}")
-    OllamaLLM = None
     ChatOllama = None
     OLLAMA_AVAILABLE = False
-
-try:
-    from langchain_openai import ChatOpenAI
-    OPENAI_AVAILABLE = True
-except ImportError as e:
-    print(f"OpenAI 라이브러리 로딩 실패: {e}")
-    ChatOpenAI = None
-    OPENAI_AVAILABLE = False
 
 # --- 문서 처리 및 벡터 스토어 ---
 from langchain_community.document_loaders import PyPDFLoader
@@ -71,8 +61,6 @@ from elasticsearch import Elasticsearch
 # --- LangChain 체인 관련 ---
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 
 # ===== 설정 =====
 # Elasticsearch 설정
@@ -557,8 +545,7 @@ class ElasticsearchManager:
                 all_documents,
                 embedding=embeddings,
                 es_url=ELASTICSEARCH_URL,
-                index_name=INDEX_NAME,
-                ssl_verify=False
+                index_name=INDEX_NAME
             )
             
             es_client.indices.refresh(index=INDEX_NAME)
@@ -578,27 +565,75 @@ class ElasticsearchManager:
 def create_rag_chain(embeddings, llm_model, top_k=3):
     """RAG 체인 생성"""
     try:
+        st.write("🔍 Elasticsearch 클라이언트 연결 확인 중...")
         # 안전한 Elasticsearch 클라이언트 확인
         es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
         if not success:
-            raise Exception(f"Elasticsearch 연결 실패: {message}")
+            error_msg = f"Elasticsearch 연결 실패: {message}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        st.write(f"✅ Elasticsearch 연결 성공: {message}")
         
+        st.write("🔍 인덱스 존재 여부 확인 중...")
+        # 인덱스 존재 확인
+        if not es_client.indices.exists(index=INDEX_NAME):
+            error_msg = f"인덱스 '{INDEX_NAME}'가 존재하지 않습니다. PDF 파일을 먼저 인덱싱하세요."
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        
+        # 문서 개수 확인
+        doc_count = es_client.count(index=INDEX_NAME).get("count", 0)
+        if doc_count == 0:
+            error_msg = f"인덱스 '{INDEX_NAME}'에 문서가 없습니다. PDF 파일을 먼저 인덱싱하세요."
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        st.write(f"✅ 인덱스에 {doc_count}개 문서 발견")
+        
+        st.write("🔍 Elasticsearch 벡터스토어 생성 중...")
         # Elasticsearch 벡터스토어 연결
-        vectorstore = ElasticsearchStore(
-            embedding=embeddings,
-            es_url=ELASTICSEARCH_URL,
-            index_name=INDEX_NAME,
-            ssl_verify=False
-        )
+        try:
+            # 가장 기본적인 방법으로 시도
+            vectorstore = ElasticsearchStore(
+                embedding=embeddings,
+                index_name=INDEX_NAME,
+                es_url=ELASTICSEARCH_URL
+            )
+            st.write("✅ 벡터스토어 생성 완료")
+        except TypeError as type_error:
+            # 파라미터 이름 문제인 경우
+            st.write(f"⚠️ 파라미터 오류, 다른 방법 시도: {str(type_error)}")
+            try:
+                vectorstore = ElasticsearchStore(
+                    embedding=embeddings,
+                    index_name=INDEX_NAME,
+                    elasticsearch_url=ELASTICSEARCH_URL
+                )
+                st.write("✅ 벡터스토어 생성 완료 (elasticsearch_url 사용)")
+            except Exception as vs_error2:
+                error_msg = f"벡터스토어 생성 실패: {str(vs_error2)}"
+                st.error(f"❌ {error_msg}")
+                return None, error_msg
+        except Exception as vs_error:
+            error_msg = f"벡터스토어 생성 실패: {str(vs_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        st.write(f"🔍 리트리버 설정 중 (top_k={top_k})...")
         # 리트리버 설정
-        retriever = vectorstore.as_retriever(
-            search_kwargs={
-                "k": top_k,
-                "fetch_k": min(top_k * 3, 10000)
-            }
-        )
+        try:
+            retriever = vectorstore.as_retriever(
+                search_kwargs={
+                    "k": top_k,
+                    "fetch_k": min(top_k * 3, 10000)
+                }
+            )
+            st.write("✅ 리트리버 설정 완료")
+        except Exception as ret_error:
+            error_msg = f"리트리버 설정 실패: {str(ret_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        st.write("🔍 프롬프트 템플릿 설정 중...")
         # 프롬프트 템플릿
         prompt_template = """
 다음 문서 내용을 바탕으로 질문에 답변해주세요.
@@ -613,24 +648,66 @@ def create_rag_chain(embeddings, llm_model, top_k=3):
 답변:
 """
         
-        prompt = PromptTemplate(
-            template=prompt_template,
-            input_variables=["context", "question"]
-        )
+        try:
+            prompt = PromptTemplate(
+                template=prompt_template,
+                input_variables=["context", "question"]
+            )
+            st.write("✅ 프롬프트 템플릿 설정 완료")
+        except Exception as prompt_error:
+            error_msg = f"프롬프트 템플릿 설정 실패: {str(prompt_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        st.write("🔍 QA 체인 생성 중...")
         # QA 체인 생성
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm_model,
-            chain_type="stuff",
-            retriever=retriever,
-            chain_type_kwargs={"prompt": prompt},
-            return_source_documents=True
-        )
+        try:
+            qa_chain = RetrievalQA.from_chain_type(
+                llm=llm_model,
+                chain_type="stuff",
+                retriever=retriever,
+                chain_type_kwargs={"prompt": prompt},
+                return_source_documents=True
+            )
+            st.write("✅ QA 체인 생성 완료")
+        except Exception as qa_error:
+            error_msg = f"QA 체인 생성 실패: {str(qa_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        # 최종 검증
+        if qa_chain is None:
+            error_msg = "QA 체인이 None으로 생성되었습니다."
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        
+        st.write("🔍 QA 체인 테스트 중...")
+        # 간단한 테스트 쿼리
+        try:
+            test_result = qa_chain({"query": "테스트"})
+            if test_result is None:
+                error_msg = "QA 체인 테스트 실패: 응답이 None입니다."
+                st.error(f"❌ {error_msg}")
+                return None, error_msg
+            st.write("✅ QA 체인 테스트 성공")
+        except Exception as test_error:
+            error_msg = f"QA 체인 테스트 실패: {str(test_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        
+        st.write("🎉 RAG 체인 생성 완전 성공!")
         return qa_chain, True
         
     except Exception as e:
-        return None, f"RAG 체인 생성 오류: {str(e)}"
+        error_msg = f"예상치 못한 오류: {str(e)} (타입: {type(e).__name__})"
+        st.error(f"❌ {error_msg}")
+        
+        # 스택 트레이스 추가
+        import traceback
+        st.error("📋 상세 스택 트레이스:")
+        st.code(traceback.format_exc())
+        
+        return None, error_msg
 
 # ===== Streamlit UI =====
 def main():
@@ -654,6 +731,10 @@ def main():
         st.session_state.messages = []
     if "processing_stats" not in st.session_state:
         st.session_state.processing_stats = None
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = None
+    if "rag_initialized" not in st.session_state:
+        st.session_state.rag_initialized = False
     
     # 사이드바 설정
     with st.sidebar:
@@ -696,13 +777,20 @@ def main():
                 "모델을 선택하세요:",
                 options=list(available_models.keys()),
                 format_func=lambda x: available_models[x]["name"],
-                index=0
+                index=0,
+                key="model_selector"
             )
             
+            # 모델이 변경되면 RAG 시스템 초기화 필요
+            if st.session_state.selected_model != model_choice:
+                st.session_state.selected_model = model_choice
+                st.session_state.qa_chain = None
+                st.session_state.rag_initialized = False
+                
             # 모델 상태 표시
             if model_choice == "upstage":
                 api_key = os.getenv("UPSTAGE_API_KEY")
-                if api_key:
+                if api_key and api_key != "your_upstage_api_key":
                     st.success("✅ Upstage API 키 설정됨")
                 else:
                     st.warning("⚠️ UPSTAGE_API_KEY 환경변수가 필요합니다")
@@ -715,6 +803,24 @@ def main():
         
         # 성능 모니터링 토글
         show_performance = st.checkbox("📊 성능 모니터링", value=True)
+        
+        # 디버깅 정보 (개발 중에만 표시)
+        with st.expander("🔧 디버그 정보"):
+            st.write(f"qa_chain: {st.session_state.qa_chain}")
+            st.write(f"qa_chain type: {type(st.session_state.qa_chain)}")
+            st.write(f"qa_chain is None: {st.session_state.qa_chain is None}")
+            st.write(f"qa_chain == False: {st.session_state.qa_chain == False}")
+            st.write(f"bool(qa_chain): {bool(st.session_state.qa_chain)}")
+            st.write(f"rag_initialized: {st.session_state.get('rag_initialized', False)}")
+            st.write(f"selected_model: {st.session_state.get('selected_model', 'None')}")
+            st.write(f"current_model_choice: {model_choice if 'model_choice' in locals() else 'None'}")
+            
+            # 상태 리셋 버튼
+            if st.button("🔄 상태 리셋", key="reset_debug"):
+                st.session_state.qa_chain = None
+                st.session_state.rag_initialized = False
+                st.session_state.selected_model = None
+                st.success("상태가 리셋되었습니다. 다시 초기화해주세요.")
         
         st.divider()
         
@@ -784,48 +890,242 @@ def main():
         st.subheader("💬 대화")
         
         # RAG 시스템 상태 표시
-        if st.session_state.qa_chain is not None:
-            st.success("✅ RAG 시스템이 초기화되어 있습니다.")
+        if st.session_state.qa_chain is not None and st.session_state.rag_initialized:
+            st.success(f"✅ RAG 시스템이 초기화되어 있습니다. (모델: {st.session_state.selected_model})")
+        elif st.session_state.rag_initialized and st.session_state.qa_chain is None:
+            st.error("❌ RAG 시스템 초기화에 오류가 있습니다. 다시 초기화해주세요.")
+            st.info("상태가 일치하지 않습니다. 아래 '상태 리셋' 버튼을 사용하세요.")
         else:
             st.warning("⚠️ RAG 시스템이 초기화되지 않았습니다.")
+            if st.session_state.qa_chain is False:
+                st.error("❌ 이전 초기화에서 오류가 발생했습니다. 다시 초기화해주세요.")
         
         # RAG 체인 초기화 버튼
         if st.button("🔧 RAG 시스템 초기화"):
+            if not available_models:
+                st.error("❌ 사용 가능한 LLM 모델이 없습니다.")
+                return
+            
             with st.spinner("RAG 시스템 초기화 중..."):
                 try:
+                    # 현재 선택된 모델 사용
+                    current_model = st.session_state.get('selected_model', model_choice)
+                    
                     # 임베딩 모델 생성
                     st.write("📝 임베딩 모델 생성 중...")
                     embeddings = ModelFactory.create_embedding_model()
                     if embeddings is None:
                         st.error("❌ 임베딩 모델 생성 실패")
-                        st.stop()
+                        return
                     st.write("✅ 임베딩 모델 생성 완료")
                     
                     # LLM 모델 생성
                     st.write("🤖 LLM 모델 생성 중...")
-                    llm_model = ModelFactory.create_llm_model(model_choice)
+                    llm_model = ModelFactory.create_llm_model(current_model)
                     if llm_model is None:
                         st.error("❌ LLM 모델 생성 실패")
-                        st.stop()
+                        return
                     st.write("✅ LLM 모델 생성 완료")
                     
                     # RAG 체인 생성
                     st.write("🔗 RAG 체인 생성 중...")
-                    qa_chain, success = create_rag_chain(embeddings, llm_model, top_k)
+                    qa_chain, success_or_error = create_rag_chain(embeddings, llm_model, top_k)
                     
-                    if success:
+                    # 결과 분석
+                    st.write(f"🔍 RAG 체인 생성 결과 분석:")
+                    st.write(f"   - qa_chain 값: {qa_chain}")
+                    st.write(f"   - qa_chain 타입: {type(qa_chain)}")
+                    st.write(f"   - success_or_error 값: {success_or_error}")
+                    st.write(f"   - success_or_error 타입: {type(success_or_error)}")
+                    
+                    if success_or_error is True and qa_chain is not None:
                         st.session_state.qa_chain = qa_chain
-                        st.session_state.messages = [
-                            {"role": "assistant", "content": f"RAG 시스템이 초기화되었습니다. 모델: {LLM_MODELS[model_choice]['name']}"}
-                        ]
+                        st.session_state.selected_model = current_model
+                        st.session_state.rag_initialized = True
+                        
+                        # 초기화 메시지 추가
+                        if not st.session_state.messages:
+                            st.session_state.messages = []
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": f"RAG 시스템이 초기화되었습니다. 모델: {LLM_MODELS[current_model]['name']}"
+                        })
+                        
                         st.success("🎉 RAG 시스템 초기화 완료!")
-                        st.rerun()  # 페이지 새로고침으로 상태 반영
+                        st.info("이제 아래에서 질문하실 수 있습니다.")
                     else:
-                        st.error(f"❌ RAG 시스템 초기화 실패: {qa_chain}")
+                        st.session_state.qa_chain = None
+                        st.session_state.rag_initialized = False
+                        
+                        # 오류 메시지 처리
+                        if success_or_error is True:
+                            error_msg = "qa_chain이 None으로 반환됨 (내부 로직 오류)"
+                        elif isinstance(success_or_error, str):
+                            error_msg = success_or_error
+                        else:
+                            error_msg = f"알 수 없는 반환값: {success_or_error}"
+                            
+                        st.error(f"❌ RAG 시스템 초기화 실패: {error_msg}")
+                        
+                        # 자동 진단 시스템
+                        st.info("� 자동 진단을 실행합니다...")
+                        with st.expander("�📋 상세 진단 결과", expanded=True):
+                            # 1. Elasticsearch 인덱스 문서 확인
+                            st.write("**1. Elasticsearch 인덱스 확인**")
+                            try:
+                                es_client, es_success, es_msg = ElasticsearchManager.get_safe_elasticsearch_client()
+                                if es_success:
+                                    try:
+                                        if es_client.indices.exists(index=INDEX_NAME):
+                                            doc_count = es_client.count(index=INDEX_NAME).get("count", 0)
+                                            if doc_count > 0:
+                                                st.success(f"✅ 인덱스 '{INDEX_NAME}'에 {doc_count}개 문서가 있습니다.")
+                                            else:
+                                                st.error(f"❌ 인덱스 '{INDEX_NAME}'가 비어있습니다. PDF 파일을 먼저 인덱싱하세요.")
+                                                st.info("💡 사이드바에서 PDF 파일을 업로드하거나 '기존 파일 재인덱싱' 버튼을 클릭하세요.")
+                                        else:
+                                            st.error(f"❌ 인덱스 '{INDEX_NAME}'가 존재하지 않습니다.")
+                                            st.info("💡 사이드바에서 PDF 파일을 업로드하여 인덱스를 생성하세요.")
+                                    except Exception as idx_e:
+                                        st.error(f"❌ 인덱스 확인 중 오류: {str(idx_e)}")
+                                else:
+                                    st.error(f"❌ Elasticsearch 연결 실패: {es_msg}")
+                            except Exception as es_e:
+                                st.error(f"❌ Elasticsearch 진단 실패: {str(es_e)}")
+                            
+                            st.divider()
+                            
+                            # 2. LLM 모델 가용성 확인
+                            st.write("**2. LLM 모델 가용성 확인**")
+                            try:
+                                test_llm = ModelFactory.create_llm_model(current_model)
+                                if test_llm is not None:
+                                    # 간단한 테스트 호출
+                                    try:
+                                        if current_model == "upstage":
+                                            # Upstage API 테스트
+                                            test_response = test_llm.invoke("안녕하세요")
+                                            st.success(f"✅ {LLM_MODELS[current_model]['name']} 모델이 정상 작동합니다.")
+                                        else:
+                                            # Ollama 모델 테스트 (간단한 ping)
+                                            try:
+                                                import requests
+                                                response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                                                if response.status_code == 200:
+                                                    models = response.json().get("models", [])
+                                                    model_names = [m.get("name", "") for m in models]
+                                                    target_model = LLM_MODELS[current_model]["model_id"]
+                                                    if any(target_model in name for name in model_names):
+                                                        st.success(f"✅ Ollama에서 {target_model} 모델을 사용할 수 있습니다.")
+                                                    else:
+                                                        st.error(f"❌ Ollama에 {target_model} 모델이 없습니다.")
+                                                        st.info(f"💡 터미널에서 'ollama pull {target_model}' 명령을 실행하세요.")
+                                                        st.code(f"ollama pull {target_model}")
+                                                else:
+                                                    st.error("❌ Ollama 서버 응답 오류")
+                                            except requests.exceptions.RequestException:
+                                                st.error("❌ Ollama 서버에 연결할 수 없습니다.")
+                                                st.info("💡 터미널에서 'ollama serve' 명령으로 Ollama를 시작하세요.")
+                                                st.code("ollama serve")
+                                    except Exception as test_e:
+                                        st.warning(f"⚠️ 모델 생성은 됐지만 테스트 호출 실패: {str(test_e)}")
+                                        if current_model in ["qwen2", "llama3"]:
+                                            st.info("💡 Ollama 서버가 실행 중이고 모델이 다운로드되어 있는지 확인하세요.")
+                                else:
+                                    st.error(f"❌ {LLM_MODELS[current_model]['name']} 모델 생성 실패")
+                            except Exception as llm_e:
+                                st.error(f"❌ LLM 모델 진단 실패: {str(llm_e)}")
+                            
+                            st.divider()
+                            
+                            # 3. API 키 및 환경변수 확인
+                            st.write("**3. API 키 및 환경변수 확인**")
+                            if current_model == "upstage":
+                                api_key = os.getenv("UPSTAGE_API_KEY")
+                                if api_key and api_key != "your_upstage_api_key":
+                                    masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "****"
+                                    st.success(f"✅ UPSTAGE_API_KEY 설정됨 ({masked_key})")
+                                else:
+                                    st.error("❌ UPSTAGE_API_KEY가 설정되지 않았습니다.")
+                                    st.info("💡 .env 파일에 UPSTAGE_API_KEY=your_actual_key를 추가하세요.")
+                                    st.code("echo 'UPSTAGE_API_KEY=your_actual_key' >> .env")
+                            else:
+                                st.success(f"✅ {LLM_MODELS[current_model]['name']}는 API 키가 필요하지 않습니다.")
+                            
+                            # 환경변수 상태
+                            st.write("**환경변수 상태:**")
+                            env_vars = {
+                                "ELASTICSEARCH_URL": ELASTICSEARCH_URL,
+                                "INDEX_NAME": INDEX_NAME,
+                                "PDF_DIR": PDF_DIR
+                            }
+                            for var, value in env_vars.items():
+                                st.write(f"• {var}: `{value}`")
+                            
+                            st.divider()
+                            
+                            # 4. 추천 해결 방법
+                            st.write("**4. 추천 해결 방법**")
+                            st.info("📝 **단계별 해결 방법:**")
+                            st.write("1️⃣ PDF 파일이 업로드되어 있는지 확인")
+                            st.write("2️⃣ Elasticsearch가 실행 중인지 확인 (Docker Compose 사용)")
+                            st.write("3️⃣ 선택한 LLM 모델 서비스가 실행 중인지 확인")
+                            st.write("4️⃣ 필요한 경우 API 키가 올바르게 설정되었는지 확인")
+                            st.write("5️⃣ '상태 리셋' 후 다시 초기화")
+                            
+                            # 빠른 액션 버튼들
+                            st.write("**빠른 액션:**")
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                if st.button("🔄 상태 리셋", key="quick_reset"):
+                                    st.session_state.qa_chain = None
+                                    st.session_state.rag_initialized = False
+                                    st.session_state.selected_model = None
+                                    st.success("상태 리셋 완료!")
+                            with col2:
+                                if st.button("📊 ES 상태", key="check_es"):
+                                    es_client, es_success, es_msg = ElasticsearchManager.get_safe_elasticsearch_client()
+                                    if es_success:
+                                        info = es_client.info()
+                                        st.json({"status": "connected", "version": info.get("version", {})})
+                                    else:
+                                        st.error(es_msg)
+                            with col3:
+                                if st.button("🤖 모델 테스트", key="test_model"):
+                                    test_model = ModelFactory.create_llm_model(current_model)
+                                    if test_model:
+                                        st.success(f"{current_model} 모델 생성 성공!")
+                                    else:
+                                        st.error(f"{current_model} 모델 생성 실패!")
                         
                 except Exception as e:
+                    st.session_state.qa_chain = None
+                    st.session_state.rag_initialized = False
                     st.error(f"❌ 초기화 중 오류 발생: {str(e)}")
-                    st.exception(e)
+                    
+                    # 예외 상황에서도 진단 정보 제공
+                    with st.expander("🔍 오류 진단 정보", expanded=True):
+                        st.write("**오류 상세 정보:**")
+                        st.code(str(e))
+                        
+                        st.write("**가능한 원인:**")
+                        if "elasticsearch" in str(e).lower():
+                            st.write("• Elasticsearch 연결 문제")
+                            st.info("💡 Elasticsearch가 실행 중인지 확인하세요: `docker-compose up elasticsearch`")
+                        elif "ollama" in str(e).lower() or "connection" in str(e).lower():
+                            st.write("• Ollama 서버 연결 문제")
+                            st.info("💡 Ollama 서버를 시작하세요: `ollama serve`")
+                        elif "api" in str(e).lower() or "key" in str(e).lower():
+                            st.write("• API 키 관련 문제")
+                            st.info("💡 .env 파일의 API 키를 확인하세요")
+                        else:
+                            st.write("• 알 수 없는 오류")
+                            st.info("💡 로그를 확인하고 필요시 시스템을 재시작하세요")
+                        
+                        if hasattr(e, '__traceback__'):
+                            import traceback
+                            with st.expander("상세 트레이스백"):
+                                st.code(traceback.format_exc())
         
         # 채팅 메시지 표시
         for message in st.session_state.messages:
@@ -839,12 +1139,15 @@ def main():
                 st.markdown(prompt)
             
             with st.chat_message("assistant"):
-                if st.session_state.qa_chain is not None:
+                if st.session_state.qa_chain is not None and st.session_state.rag_initialized:
                     with st.spinner("답변 생성 중..."):
+                        # 현재 모델 확인
+                        current_model = st.session_state.get('selected_model')
+                        
                         # 하이브리드 추적으로 LLM 추론
                         if show_performance:
                             metadata = {
-                                'model': LLM_MODELS[model_choice]['name'],
+                                'model': LLM_MODELS[current_model]['name'] if current_model else 'Unknown',
                                 'top_k': top_k,
                                 'query_length': len(prompt)
                             }
@@ -884,8 +1187,11 @@ def main():
                                 st.divider()
                 else:
                     st.warning("먼저 RAG 시스템을 초기화해주세요.")
+                    st.info("위의 '🔧 RAG 시스템 초기화' 버튼을 클릭하세요.")
+                    if st.session_state.rag_initialized and st.session_state.qa_chain is None:
+                        st.error("⚠️ 시스템 상태 불일치가 감지되었습니다. 사이드바의 '상태 리셋' 버튼을 사용하세요.")
             
-            if st.session_state.qa_chain is not None:
+            if st.session_state.qa_chain is not None and st.session_state.rag_initialized:
                 st.session_state.messages.append({"role": "assistant", "content": response["result"]})
     
     with col2:

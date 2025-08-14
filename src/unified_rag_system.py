@@ -958,14 +958,18 @@ def main():
     with col1:
         st.subheader("💬 대화")
         
+        # 경고 메시지를 위한 동적 컨테이너 생성
+        warning_container = st.empty()
+        
         # RAG 시스템 상태 표시
         if st.session_state.qa_chain is not None and st.session_state.rag_initialized:
             st.success(f"✅ RAG 시스템이 초기화되어 있습니다. (모델: {st.session_state.selected_model})")
         elif st.session_state.rag_initialized and st.session_state.qa_chain is None:
             st.error("❌ RAG 시스템 초기화에 오류가 있습니다. 다시 초기화해주세요.")
             st.info("상태가 일치하지 않습니다. 아래 '상태 리셋' 버튼을 사용하세요.")
-        else:
-            st.warning("⚠️ RAG 시스템이 초기화되지 않았습니다.")
+        elif not st.session_state.rag_initialized:
+            # RAG 시스템이 초기화되지 않은 경우에만 경고 메시지 표시
+            warning_container.warning("⚠️ RAG 시스템이 초기화되지 않았습니다.")
             if st.session_state.qa_chain is False:
                 st.error("❌ 이전 초기화에서 오류가 발생했습니다. 다시 초기화해주세요.")
         
@@ -1011,6 +1015,9 @@ def main():
                         st.session_state.qa_chain = qa_chain
                         st.session_state.selected_model = current_model
                         st.session_state.rag_initialized = True
+                        
+                        # 경고 메시지 즉시 제거
+                        warning_container.empty()
                         
                         # 초기화 메시지 추가
                         if not st.session_state.messages:

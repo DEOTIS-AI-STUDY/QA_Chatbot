@@ -545,8 +545,7 @@ class ElasticsearchManager:
                 all_documents,
                 embedding=embeddings,
                 es_url=ELASTICSEARCH_URL,
-                index_name=INDEX_NAME,
-                ssl_verify=False
+                index_name=INDEX_NAME
             )
             
             es_client.indices.refresh(index=INDEX_NAME)
@@ -566,27 +565,75 @@ class ElasticsearchManager:
 def create_rag_chain(embeddings, llm_model, top_k=3):
     """RAG 체인 생성"""
     try:
+        st.write("🔍 Elasticsearch 클라이언트 연결 확인 중...")
         # 안전한 Elasticsearch 클라이언트 확인
         es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
         if not success:
-            raise Exception(f"Elasticsearch 연결 실패: {message}")
+            error_msg = f"Elasticsearch 연결 실패: {message}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        st.write(f"✅ Elasticsearch 연결 성공: {message}")
         
+        st.write("🔍 인덱스 존재 여부 확인 중...")
+        # 인덱스 존재 확인
+        if not es_client.indices.exists(index=INDEX_NAME):
+            error_msg = f"인덱스 '{INDEX_NAME}'가 존재하지 않습니다. PDF 파일을 먼저 인덱싱하세요."
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        
+        # 문서 개수 확인
+        doc_count = es_client.count(index=INDEX_NAME).get("count", 0)
+        if doc_count == 0:
+            error_msg = f"인덱스 '{INDEX_NAME}'에 문서가 없습니다. PDF 파일을 먼저 인덱싱하세요."
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        st.write(f"✅ 인덱스에 {doc_count}개 문서 발견")
+        
+        st.write("🔍 Elasticsearch 벡터스토어 생성 중...")
         # Elasticsearch 벡터스토어 연결
-        vectorstore = ElasticsearchStore(
-            embedding=embeddings,
-            es_url=ELASTICSEARCH_URL,
-            index_name=INDEX_NAME,
-            ssl_verify=False
-        )
+        try:
+            # 가장 기본적인 방법으로 시도
+            vectorstore = ElasticsearchStore(
+                embedding=embeddings,
+                index_name=INDEX_NAME,
+                es_url=ELASTICSEARCH_URL
+            )
+            st.write("✅ 벡터스토어 생성 완료")
+        except TypeError as type_error:
+            # 파라미터 이름 문제인 경우
+            st.write(f"⚠️ 파라미터 오류, 다른 방법 시도: {str(type_error)}")
+            try:
+                vectorstore = ElasticsearchStore(
+                    embedding=embeddings,
+                    index_name=INDEX_NAME,
+                    elasticsearch_url=ELASTICSEARCH_URL
+                )
+                st.write("✅ 벡터스토어 생성 완료 (elasticsearch_url 사용)")
+            except Exception as vs_error2:
+                error_msg = f"벡터스토어 생성 실패: {str(vs_error2)}"
+                st.error(f"❌ {error_msg}")
+                return None, error_msg
+        except Exception as vs_error:
+            error_msg = f"벡터스토어 생성 실패: {str(vs_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        st.write(f"🔍 리트리버 설정 중 (top_k={top_k})...")
         # 리트리버 설정
-        retriever = vectorstore.as_retriever(
-            search_kwargs={
-                "k": top_k,
-                "fetch_k": min(top_k * 3, 10000)
-            }
-        )
+        try:
+            retriever = vectorstore.as_retriever(
+                search_kwargs={
+                    "k": top_k,
+                    "fetch_k": min(top_k * 3, 10000)
+                }
+            )
+            st.write("✅ 리트리버 설정 완료")
+        except Exception as ret_error:
+            error_msg = f"리트리버 설정 실패: {str(ret_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        st.write("🔍 프롬프트 템플릿 설정 중...")
         # 프롬프트 템플릿
         prompt_template = """
 다음 문서 내용을 바탕으로 질문에 답변해주세요.
@@ -601,24 +648,66 @@ def create_rag_chain(embeddings, llm_model, top_k=3):
 답변:
 """
         
-        prompt = PromptTemplate(
-            template=prompt_template,
-            input_variables=["context", "question"]
-        )
+        try:
+            prompt = PromptTemplate(
+                template=prompt_template,
+                input_variables=["context", "question"]
+            )
+            st.write("✅ 프롬프트 템플릿 설정 완료")
+        except Exception as prompt_error:
+            error_msg = f"프롬프트 템플릿 설정 실패: {str(prompt_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        st.write("🔍 QA 체인 생성 중...")
         # QA 체인 생성
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm_model,
-            chain_type="stuff",
-            retriever=retriever,
-            chain_type_kwargs={"prompt": prompt},
-            return_source_documents=True
-        )
+        try:
+            qa_chain = RetrievalQA.from_chain_type(
+                llm=llm_model,
+                chain_type="stuff",
+                retriever=retriever,
+                chain_type_kwargs={"prompt": prompt},
+                return_source_documents=True
+            )
+            st.write("✅ QA 체인 생성 완료")
+        except Exception as qa_error:
+            error_msg = f"QA 체인 생성 실패: {str(qa_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
         
+        # 최종 검증
+        if qa_chain is None:
+            error_msg = "QA 체인이 None으로 생성되었습니다."
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        
+        st.write("🔍 QA 체인 테스트 중...")
+        # 간단한 테스트 쿼리
+        try:
+            test_result = qa_chain({"query": "테스트"})
+            if test_result is None:
+                error_msg = "QA 체인 테스트 실패: 응답이 None입니다."
+                st.error(f"❌ {error_msg}")
+                return None, error_msg
+            st.write("✅ QA 체인 테스트 성공")
+        except Exception as test_error:
+            error_msg = f"QA 체인 테스트 실패: {str(test_error)}"
+            st.error(f"❌ {error_msg}")
+            return None, error_msg
+        
+        st.write("🎉 RAG 체인 생성 완전 성공!")
         return qa_chain, True
         
     except Exception as e:
-        return None, f"RAG 체인 생성 오류: {str(e)}"
+        error_msg = f"예상치 못한 오류: {str(e)} (타입: {type(e).__name__})"
+        st.error(f"❌ {error_msg}")
+        
+        # 스택 트레이스 추가
+        import traceback
+        st.error("📋 상세 스택 트레이스:")
+        st.code(traceback.format_exc())
+        
+        return None, error_msg
 
 # ===== Streamlit UI =====
 def main():
@@ -840,9 +929,16 @@ def main():
                     
                     # RAG 체인 생성
                     st.write("🔗 RAG 체인 생성 중...")
-                    qa_chain, success = create_rag_chain(embeddings, llm_model, top_k)
+                    qa_chain, success_or_error = create_rag_chain(embeddings, llm_model, top_k)
                     
-                    if success and qa_chain is not None:
+                    # 결과 분석
+                    st.write(f"🔍 RAG 체인 생성 결과 분석:")
+                    st.write(f"   - qa_chain 값: {qa_chain}")
+                    st.write(f"   - qa_chain 타입: {type(qa_chain)}")
+                    st.write(f"   - success_or_error 값: {success_or_error}")
+                    st.write(f"   - success_or_error 타입: {type(success_or_error)}")
+                    
+                    if success_or_error is True and qa_chain is not None:
                         st.session_state.qa_chain = qa_chain
                         st.session_state.selected_model = current_model
                         st.session_state.rag_initialized = True
@@ -860,7 +956,15 @@ def main():
                     else:
                         st.session_state.qa_chain = None
                         st.session_state.rag_initialized = False
-                        error_msg = qa_chain if not success else "알 수 없는 오류"
+                        
+                        # 오류 메시지 처리
+                        if success_or_error is True:
+                            error_msg = "qa_chain이 None으로 반환됨 (내부 로직 오류)"
+                        elif isinstance(success_or_error, str):
+                            error_msg = success_or_error
+                        else:
+                            error_msg = f"알 수 없는 반환값: {success_or_error}"
+                            
                         st.error(f"❌ RAG 시스템 초기화 실패: {error_msg}")
                         
                         # 자동 진단 시스템

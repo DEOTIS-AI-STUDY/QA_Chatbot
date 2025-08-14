@@ -108,7 +108,7 @@ else
 
     # LLM 패키지들 설치
     log_info "LLM 패키지 설치 중..."
-    pip install langchain-upstage langchain-ollama langchain-openai > /dev/null 2>&1
+    pip install langchain-upstage==0.7.1 langchain-ollama > /dev/null 2>&1
 
     # 임베딩 및 기타 패키지들 설치
     log_info "임베딩 및 기타 패키지 설치 중..."
@@ -224,12 +224,6 @@ if [ -f ".env" ]; then
     # API 키 확인
     source .env 2>/dev/null || true
     
-    if [ -n "$OPENAI_API_KEY" ] && [ "$OPENAI_API_KEY" != "your_openai_api_key" ]; then
-        log_success "OpenAI API 키 설정됨"
-    else
-        log_warning "OpenAI API 키가 설정되지 않았습니다"
-    fi
-    
     if [ -n "$UPSTAGE_API_KEY" ] && [ "$UPSTAGE_API_KEY" != "your_upstage_api_key" ]; then
         log_success "Upstage API 키 설정됨"
     else
@@ -245,10 +239,7 @@ else
     log_warning ".env 파일이 없습니다. 샘플 파일을 생성합니다..."
     
     cat > .env << 'EOF'
-# OpenAI API 키
-OPENAI_API_KEY=your_openai_api_key
-
-# Upstage API 키
+# Upstage API 키  
 UPSTAGE_API_KEY=your_upstage_api_key
 
 # Langsmith 설정 (선택사항)

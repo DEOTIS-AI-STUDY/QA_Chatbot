@@ -65,9 +65,6 @@ log_success "패키지 설치 완료"
 if [ ! -f ".env" ]; then
     log_info ".env 파일을 생성합니다..."
     cat > .env << 'EOF'
-# OpenAI API 키
-OPENAI_API_KEY=your_openai_api_key
-
 # Upstage API 키  
 UPSTAGE_API_KEY=your_upstage_api_key
 
@@ -95,6 +92,8 @@ echo
 echo "=============================================================================="
 echo -e "${GREEN}📝 다음 단계${NC}"
 echo "=============================================================================="
-echo "1. .env 파일에서 API 키 설정"
-echo "2. ./run_unified_rag.sh 실행"
+echo "1. .env 파일에서 API 키 설정:"
+echo "   - UPSTAGE_API_KEY=your_actual_key"
+echo "2. 시스템 실행:"
+echo "   ./run_unified_rag.sh"
 echo "=============================================================================="

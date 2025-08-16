@@ -18,10 +18,10 @@ BGE_MODEL_NAME = "BAAI/bge-m3"
 
 # ===== LLM 모델 설정 =====
 LLM_MODELS = {
-    "upstage": {
-        "name": "Upstage Solar LLM",
-        "model_id": "solar-1-mini-chat",
-        "api_key_env": "UPSTAGE_API_KEY"
+    "solar_10_7b": {
+        "name": "Upstage SOLAR-10.7B-v1.0 (Open Source)",
+        "model_id": "solar:10.7b",
+        "api_key_env": None
     },
     "qwen2": {
         "name": "Qwen2",

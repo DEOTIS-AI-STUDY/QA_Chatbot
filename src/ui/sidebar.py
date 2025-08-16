@@ -70,8 +70,11 @@ def _show_model_status(model_choice):
             st.success("✅ Upstage API 키 설정됨")
         else:
             st.warning("⚠️ UPSTAGE_API_KEY 환경변수가 필요합니다")
-    elif model_choice in ["qwen2", "llama3"]:
-        st.info("ℹ️ Ollama 서버가 실행 중인지 확인하세요")
+    elif model_choice in ["qwen2", "llama3", "solar_10_7b"]:
+        if model_choice == "solar_10_7b":
+            st.info("ℹ️ SOLAR-10.7B 오픈소스 모델 - Ollama 서버가 실행 중인지 확인하세요")
+        else:
+            st.info("ℹ️ Ollama 서버가 실행 중인지 확인하세요")
 
 
 def _render_pdf_management():

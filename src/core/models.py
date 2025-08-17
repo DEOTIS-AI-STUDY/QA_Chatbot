@@ -107,8 +107,6 @@ class ModelFactory:
         """사용 가능한 모델 목록 반환"""
         available_models = {}
         
-        if UPSTAGE_AVAILABLE:
-            available_models["upstage"] = LLM_MODELS["upstage"]
         if OLLAMA_AVAILABLE:
             available_models["qwen2"] = LLM_MODELS["qwen2"]
             available_models["llama3"] = LLM_MODELS["llama3"]

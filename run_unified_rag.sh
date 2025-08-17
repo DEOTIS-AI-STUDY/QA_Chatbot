@@ -59,6 +59,45 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
+# Docker 데몬 상태 확인 및 자동 시작
+if ! docker info &> /dev/null; then
+    log_warning "Docker 데몬이 실행되지 않고 있습니다."
+    
+    # macOS에서 Docker Desktop 자동 시작
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        if [ -d "/Applications/Docker.app" ]; then
+            log_info "Docker Desktop을 시작합니다..."
+            open -a Docker
+            log_info "Docker Desktop 시작 중... 30초 대기합니다."
+            sleep 30
+            
+            # Docker 데몬이 시작될 때까지 최대 60초 대기
+            for i in {1..12}; do
+                if docker info &> /dev/null; then
+                    log_success "Docker 데몬이 시작되었습니다."
+                    break
+                fi
+                log_info "Docker 데몬 시작 대기 중... ($i/12)"
+                sleep 5
+            done
+            
+            if ! docker info &> /dev/null; then
+                log_error "Docker 데몬 시작에 실패했습니다."
+                log_info "수동으로 Docker Desktop을 시작한 후 다시 실행해주세요."
+                exit 1
+            fi
+        else
+            log_error "Docker Desktop이 설치되지 않았습니다."
+            log_info "Docker Desktop 설치: https://docs.docker.com/desktop/mac/install/"
+            exit 1
+        fi
+    else
+        log_error "Docker 데몬을 시작할 수 없습니다."
+        log_info "수동으로 Docker를 시작한 후 다시 실행해주세요."
+        exit 1
+    fi
+fi
+
 log_success "Docker 확인: $(docker --version)"
 
 # =============================================================================

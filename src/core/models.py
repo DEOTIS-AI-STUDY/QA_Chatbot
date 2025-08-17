@@ -56,9 +56,22 @@ class ModelFactory:
                     model=LLM_MODELS["upstage"]["model_id"],
                     temperature=0
                 )
-                return model, "✅ Upstage 모델 생성 성공"
+                return model, "✅ Upstage Solar Mini 모델 생성 성공"
             except Exception as e:
                 return None, f"Upstage 모델 생성 실패: {str(e)}"
+        
+        elif model_choice == "solar_10_7b":
+            if not OLLAMA_AVAILABLE:
+                return None, "❌ Ollama 라이브러리가 설치되지 않았습니다. pip install langchain-ollama"
+            
+            try:
+                model = ChatOllama(
+                    model=LLM_MODELS["solar_10_7b"]["model_id"],
+                    temperature=0
+                )
+                return model, "✅ SOLAR-10.7B 오픈소스 모델 생성 성공"
+            except Exception as e:
+                return None, f"SOLAR-10.7B 모델 생성 실패: {str(e)}"
         
         elif model_choice == "qwen2":
             if not OLLAMA_AVAILABLE:
@@ -94,10 +107,9 @@ class ModelFactory:
         """사용 가능한 모델 목록 반환"""
         available_models = {}
         
-        if UPSTAGE_AVAILABLE:
-            available_models["upstage"] = LLM_MODELS["upstage"]
         if OLLAMA_AVAILABLE:
             available_models["qwen2"] = LLM_MODELS["qwen2"]
             available_models["llama3"] = LLM_MODELS["llama3"]
+            available_models["solar_10_7b"] = LLM_MODELS["solar_10_7b"]
             
         return available_models

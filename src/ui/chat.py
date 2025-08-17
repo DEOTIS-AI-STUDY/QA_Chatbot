@@ -6,11 +6,15 @@ from core.models import ModelFactory
 from core.rag import create_rag_chain
 from core.config import LLM_MODELS
 from ui.diagnostics import show_initialization_diagnostics
+from ui.common import get_chat_manager, get_chat_interface
 
 
 def render_chat_interface(available_models, model_choice, top_k):
     """채팅 인터페이스 렌더링"""
     st.subheader("💬 대화")
+    
+    # 대화 기록 관리 버튼들
+    _render_chat_history_controls()
     
     # RAG 시스템 상태 표시 및 초기화 버튼
     warning_container = _show_rag_status()
@@ -21,6 +25,20 @@ def render_chat_interface(available_models, model_choice, top_k):
     
     # 사용자 입력 처리
     _handle_user_input(top_k)
+
+
+def _render_chat_history_controls():
+    """대화 기록 관리 컨트롤 렌더링"""
+    chat_interface = get_chat_interface()
+    chat_manager = get_chat_manager()
+    
+    show_clicked, clear_clicked = chat_interface.render_controls()
+    
+    # 대화 기록 표시
+    if st.session_state.get('show_history', False) or show_clicked:
+        if not st.session_state.get('show_history', False):
+            st.session_state.show_history = True
+        chat_interface.show_history()
 
 
 def _show_rag_status():
@@ -146,50 +164,64 @@ def _handle_user_input(top_k):
 
 
 def _process_query(prompt, top_k):
-    """쿼리 처리"""
+    """쿼리 처리 - 공통 대화 기록 관리자 사용"""
     with st.spinner("답변 생성 중..."):
         current_model = st.session_state.get('selected_model')
+        chat_manager = get_chat_manager()
+        
+        # 대화 기록을 포함한 컨텍스트 구성
+        context_query = chat_manager.build_context_query(prompt)
         
         # 하이브리드 추적으로 LLM 추론
         metadata = {
             'model': LLM_MODELS[current_model]['name'] if current_model else 'Unknown',
             'top_k': top_k,
-            'query_length': len(prompt)
+            'query_length': len(context_query),
+            'original_query': prompt,
+            'has_context': chat_manager.has_history()
         }
         
         combined_result = st.session_state.hybrid_tracker.track_llm_inference(
             st.session_state.qa_chain,
-            prompt,
+            context_query,  # 컨텍스트가 포함된 질의 사용
             metadata
         )
         
         response = combined_result['response']
         system_metrics = combined_result['system_metrics']
         
+        # 답변 추출
+        answer = response["result"]
+        
         # 답변 표시
-        st.markdown(response["result"])
+        st.markdown(answer)
+        
+        # 공통 대화 기록 관리자에 추가 (원본 질문과 답변만 저장)
+        chat_manager.add_chat(prompt, answer)
         
         # 성능 정보 표시
-        _show_performance_info(system_metrics)
+        _show_performance_info(system_metrics, chat_manager.get_history_count())
         
         # 소스 문서 표시
         _show_source_documents(response["source_documents"])
         
-        # 메시지 히스토리에 추가
-        st.session_state.messages.append({"role": "assistant", "content": response["result"]})
+        # 메시지 히스토리에 추가 (원본 질문만)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
 
-def _show_performance_info(system_metrics):
-    """성능 정보 표시"""
+def _show_performance_info(system_metrics, chat_history_count=0):
+    """성능 정보 표시 - 대화 기록 정보 포함"""
     if system_metrics:
         with st.expander("⚡ 성능 정보"):
-            perf_col1, perf_col2, perf_col3 = st.columns(3)
+            perf_col1, perf_col2, perf_col3, perf_col4 = st.columns(4)
             with perf_col1:
                 st.metric("응답 시간", f"{system_metrics['duration']:.2f}초")
             with perf_col2:
                 st.metric("총 메모리", f"{system_metrics['total_memory_used']:.2f}MB")
             with perf_col3:
                 st.metric("ES 프로세스", system_metrics['elasticsearch_process_count'])
+            with perf_col4:
+                st.metric("대화 기록", f"{chat_history_count}개")
 
 
 def _show_source_documents(source_documents):

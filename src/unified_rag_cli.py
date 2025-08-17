@@ -21,6 +21,7 @@ sys.path.append(current_dir)
 from core.config import LLM_MODELS, HUGGINGFACE_EMBEDDINGS_AVAILABLE, UPSTAGE_AVAILABLE, OLLAMA_AVAILABLE
 from core.models import ModelFactory
 from core.rag import create_rag_chain
+from core.chat_history import ChatHistoryManager, CLIChatHistoryInterface
 from utils.elasticsearch import ElasticsearchManager
 
 # Elasticsearch 가용성 확인
@@ -44,6 +45,10 @@ class CLIRAGSystem:
         self.llm_model = None
         self.model_choice = None
         self.top_k = 5
+        
+        # 공통 대화 기록 관리자 사용
+        self.chat_manager = ChatHistoryManager(max_history=10)
+        self.chat_interface = CLIChatHistoryInterface(self.chat_manager)
         
     def check_dependencies(self) -> bool:
         """의존성 확인"""
@@ -218,7 +223,7 @@ class CLIRAGSystem:
         print("="*60)
     
     def process_query(self, query: str) -> Optional[str]:
-        """질의 처리"""
+        """질의 처리 - 공통 대화 기록 관리자 사용"""
         if not self.rag_chain:
             print("❌ RAG 시스템이 초기화되지 않았습니다.")
             return None
@@ -226,34 +231,49 @@ class CLIRAGSystem:
         try:
             print(f"\n🔍 질의 처리 중: {query}")
             
-            # RAG 체인 실행 - core/rag.py에서 사용하는 형식에 맞춤
-            response = self.rag_chain({"query": query})
+            # 대화 기록을 포함한 컨텍스트 구성
+            context_query = self.chat_manager.build_context_query(query)
             
-            # response는 딕셔너리 형태일 것으로 예상됨
-            if isinstance(response, dict):
-                if 'result' in response:
-                    return response['result']
-                elif 'answer' in response:
-                    return response['answer']
-                else:
-                    return str(response)
-            elif hasattr(response, 'content'):
-                return response.content
-            elif isinstance(response, str):
-                return response
-            else:
-                return str(response)
+            # RAG 체인 실행
+            response = self.rag_chain({"query": context_query})
+            
+            # 응답 처리
+            answer = self._extract_answer(response)
+            
+            if answer:
+                # 공통 대화 기록 관리자에 추가 (원본 질문과 답변만)
+                self.chat_manager.add_chat(query, answer)
+                return answer
+            
+            return None
                 
         except Exception as e:
             print(f"❌ 질의 처리 오류: {str(e)}")
             return None
     
+    def _extract_answer(self, response) -> Optional[str]:
+        """응답에서 답변 추출"""
+        if isinstance(response, dict):
+            if 'result' in response:
+                return response['result']
+            elif 'answer' in response:
+                return response['answer']
+            else:
+                return str(response)
+        elif hasattr(response, 'content'):
+            return response.content
+        elif isinstance(response, str):
+            return response
+        else:
+            return str(response)
+    
     def interactive_chat(self):
-        """대화형 채팅 모드"""
+        """대화형 채팅 모드 - 대화 기록 포함"""
         self.show_system_info()
         
         print("\n💬 대화형 채팅 모드 시작")
         print("(종료: 'exit', 'quit', 또는 Ctrl+C)")
+        print("(대화기록 보기: 'history', 기록 삭제: 'clear')")
         print("-" * 60)
         
         chat_count = 0
@@ -266,23 +286,35 @@ class CLIRAGSystem:
                 if not query:
                     continue
                 
-                # 종료 명령어 확인
+                # 특수 명령어 처리
                 if query.lower() in ['exit', 'quit', '종료']:
                     print("\n👋 채팅을 종료합니다.")
                     break
+                elif query.lower() in ['history', '기록', '히스토리']:
+                    self.chat_interface.show_history()
+                    continue
+                elif query.lower() in ['clear', '삭제', '클리어']:
+                    self.chat_interface.clear_history_with_confirmation()
+                    continue
                 
                 # 질의 처리
                 response = self.process_query(query)
                 
                 if response:
                     chat_count += 1
-                    print(f"\n🤖 답변:")
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    print(f"\n🤖 답변 [{timestamp}]:")
                     print("-" * 40)
                     
                     # 텍스트 래핑으로 가독성 향상
                     wrapped_response = textwrap.fill(response, width=80)
                     print(wrapped_response)
                     print("-" * 40)
+                    
+                    # 대화 기록 요약 표시
+                    if self.chat_manager.has_history():
+                        self.chat_interface.show_status_info()
                 else:
                     print("❌ 답변을 생성할 수 없습니다.")
                     

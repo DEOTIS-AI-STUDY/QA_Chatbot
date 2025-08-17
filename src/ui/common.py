@@ -4,6 +4,7 @@ Streamlit UI 공통 유틸리티
 import streamlit as st
 import uuid
 from core.performance import HybridPerformanceTracker
+from core.chat_history import ChatHistoryManager, StreamlitChatHistoryInterface
 
 
 def initialize_session_state():
@@ -16,6 +17,11 @@ def initialize_session_state():
         st.session_state.qa_chain = None
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    # 공통 대화 기록 관리자 초기화
+    if "chat_manager" not in st.session_state:
+        st.session_state.chat_manager = ChatHistoryManager(max_history=15)
+    if "chat_interface" not in st.session_state:
+        st.session_state.chat_interface = StreamlitChatHistoryInterface(st.session_state.chat_manager)
     if "processing_stats" not in st.session_state:
         st.session_state.processing_stats = None
     if "selected_model" not in st.session_state:
@@ -29,6 +35,10 @@ def reset_rag_state():
     st.session_state.qa_chain = None
     st.session_state.rag_initialized = False
     st.session_state.selected_model = None
+    st.session_state.messages = []
+    # 공통 대화 기록 관리자 리셋
+    if hasattr(st.session_state, 'chat_manager'):
+        st.session_state.chat_manager.clear_history()
     st.success("상태가 리셋되었습니다. 다시 초기화해주세요.")
 
 
@@ -46,6 +56,17 @@ def show_debug_info():
         # 상태 리셋 버튼
         if st.button("🔄 상태 리셋", key="reset_debug"):
             reset_rag_state()
+
+
+# 공통 모듈 사용으로 대체된 함수들
+def get_chat_manager():
+    """공통 대화 기록 관리자 반환"""
+    return st.session_state.chat_manager
+
+
+def get_chat_interface():
+    """공통 대화 기록 인터페이스 반환"""
+    return st.session_state.chat_interface
 
 
 def show_rag_status():

@@ -65,8 +65,9 @@ class CLIRAGSystem:
         # Elasticsearch 서버 연결 확인
         try:
             es_manager = ElasticsearchManager()
-            if not es_manager.check_connection():
-                issues.append("❌ Elasticsearch 서버에 연결할 수 없습니다. (http://localhost:9200)")
+            is_connected, connection_msg = es_manager.check_connection()
+            if not is_connected:
+                issues.append(f"❌ Elasticsearch 서버 연결 실패: {connection_msg}")
         except Exception as e:
             issues.append(f"❌ Elasticsearch 연결 오류: {str(e)}")
         
@@ -156,6 +157,120 @@ class CLIRAGSystem:
         except ValueError:
             print("❌ 잘못된 값입니다. 기본값을 유지합니다.")
     
+    def _auto_index_pdfs(self) -> bool:
+        """PDF 파일 자동 인덱싱"""
+        from core.config import PDF_DIR, INDEX_NAME
+        from elasticsearch import Elasticsearch
+        
+        # PDF 디렉토리 확인
+        if not os.path.exists(PDF_DIR):
+            print(f"📁 PDF 디렉토리({PDF_DIR})가 없습니다. 생성합니다...")
+            os.makedirs(PDF_DIR, exist_ok=True)
+            print("📄 PDF 파일이 없어서 인덱싱을 건너뜁니다.")
+            return True
+        
+        # PDF 파일 목록 확인
+        pdf_files = self.es_manager.list_pdfs(PDF_DIR)
+        if not pdf_files:
+            print("📄 PDF 파일이 없어서 인덱싱을 건너뜁니다.")
+            return True
+        
+        # 인덱스 존재 확인
+        es = Elasticsearch("http://localhost:9200")
+        index_exists = es.indices.exists(index=INDEX_NAME)
+        
+        if index_exists:
+            # 문서 수 확인
+            try:
+                doc_count = es.count(index=INDEX_NAME).get("count", 0)
+                if doc_count > 0:
+                    print(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다. 인덱싱을 건너뜁니다.")
+                    return True
+            except:
+                pass
+        
+        # PDF 파일 인덱싱 실행
+        print(f"📄 {len(pdf_files)}개 PDF 파일을 자동 인덱싱합니다...")
+        for pdf_file in pdf_files:
+            print(f"  - {os.path.basename(pdf_file)}")
+        
+        try:
+            # 간단한 트래커 생성 (CLI용)
+            class SimpleTracker:
+                def track_preprocessing_stage(self, stage): pass
+                def end_preprocessing_stage(self, stage): pass
+            
+            tracker = SimpleTracker()
+            success, message = self.es_manager.index_pdfs(pdf_files, self.embedding_model, tracker)
+            
+            if success:
+                print(f"✅ PDF 자동 인덱싱 완료: {message}")
+                return True
+            else:
+                print(f"❌ PDF 자동 인덱싱 실패: {message}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ PDF 자동 인덱싱 오류: {str(e)}")
+            return False
+    
+    def _auto_index_pdfs(self) -> bool:
+        """PDF 파일 자동 인덱싱"""
+        from core.config import PDF_DIR, INDEX_NAME
+        from elasticsearch import Elasticsearch
+        
+        # PDF 디렉토리 확인
+        if not os.path.exists(PDF_DIR):
+            print(f"📁 PDF 디렉토리({PDF_DIR})가 없습니다. 생성합니다...")
+            os.makedirs(PDF_DIR, exist_ok=True)
+            print("📄 PDF 파일이 없어서 인덱싱을 건너뜁니다.")
+            return True
+        
+        # PDF 파일 목록 확인
+        pdf_files = self.es_manager.list_pdfs(PDF_DIR)
+        if not pdf_files:
+            print("📄 PDF 파일이 없어서 인덱싱을 건너뜁니다.")
+            return True
+        
+        # 인덱스 존재 확인
+        es = Elasticsearch("http://localhost:9200")
+        index_exists = es.indices.exists(index=INDEX_NAME)
+        
+        if index_exists:
+            # 문서 수 확인
+            try:
+                doc_count = es.count(index=INDEX_NAME).get("count", 0)
+                if doc_count > 0:
+                    print(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다. 인덱싱을 건너뜁니다.")
+                    return True
+            except:
+                pass
+        
+        # PDF 파일 인덱싱 실행
+        print(f"📄 {len(pdf_files)}개 PDF 파일을 자동 인덱싱합니다...")
+        for pdf_file in pdf_files:
+            print(f"  - {os.path.basename(pdf_file)}")
+        
+        try:
+            # 간단한 트래커 생성 (CLI용)
+            class SimpleTracker:
+                def track_preprocessing_stage(self, stage): pass
+                def end_preprocessing_stage(self, stage): pass
+            
+            tracker = SimpleTracker()
+            success, message = self.es_manager.index_pdfs(pdf_files, self.embedding_model, tracker)
+            
+            if success:
+                print(f"✅ PDF 자동 인덱싱 완료: {message}")
+                return True
+            else:
+                print(f"❌ PDF 자동 인덱싱 실패: {message}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ PDF 자동 인덱싱 오류: {str(e)}")
+            return False
+    
     def initialize_rag_system(self) -> bool:
         """RAG 시스템 초기화"""
         print("\n🚀 RAG 시스템 초기화 중...")
@@ -163,10 +278,11 @@ class CLIRAGSystem:
         # 1. Elasticsearch 연결
         try:
             self.es_manager = ElasticsearchManager()
-            if not self.es_manager.check_connection():
-                print("❌ Elasticsearch 연결 실패")
+            is_connected, connection_msg = self.es_manager.check_connection()
+            if not is_connected:
+                print(f"❌ Elasticsearch 연결 실패: {connection_msg}")
                 return False
-            print("✅ Elasticsearch 연결 성공")
+            print(f"✅ Elasticsearch 연결 성공: {connection_msg}")
         except Exception as e:
             print(f"❌ Elasticsearch 초기화 오류: {str(e)}")
             return False
@@ -181,6 +297,14 @@ class CLIRAGSystem:
         except Exception as e:
             print(f"❌ 임베딩 모델 오류: {str(e)}")
             return False
+        
+        # 2.5. PDF 자동 인덱싱 확인 및 실행
+        try:
+            success = self._auto_index_pdfs()
+            if not success:
+                print("⚠️ PDF 자동 인덱싱 실패, 계속 진행합니다...")
+        except Exception as e:
+            print(f"⚠️ PDF 자동 인덱싱 오류: {str(e)}, 계속 진행합니다...")
         
         # 3. LLM 모델 로드
         try:

@@ -1,0 +1,138 @@
+version: "3.8"
+
+services:
+  # Elasticsearch 서비스
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch-prod
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - rag-network
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Kibana 서비스 (선택사항)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana-prod
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana
+      - SERVER_HOST=0.0.0.0
+    ports:
+      - "5601:5601"
+    networks:
+      - rag-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # RAG 애플리케이션 서비스
+  rag-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-app-prod
+    ports:
+      - "8501:8501"
+    environment:
+      # Elasticsearch 연결 설정
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - INDEX_NAME=unified_rag_prod
+
+      # PDF 디렉토리 설정
+      - PDF_DIR=pdf
+
+      # Streamlit 설정
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+      # Python 경로 설정
+      - PYTHONPATH=/app
+
+      # LangSmith 설정 (선택사항 - 환경에 맞게 수정)
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-unified-rag-prod}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
+
+      # Upstage API 키 (환경변수에서 가져오기)
+      - UPSTAGE_API_KEY=${UPSTAGE_API_KEY:-}
+
+      # 운영 환경 설정
+      - ENVIRONMENT=production
+    volumes:
+      # PDF 파일 볼륨 마운트 (로컬 pdf 디렉토리를 컨테이너에 마운트)
+      - ./pdf:/app/pdf:ro
+
+      # 로그 디렉토리 (선택사항)
+      - ./logs:/app/logs
+
+      # 환경설정 파일 (선택사항)
+      - ./.env:/app/.env:ro
+    networks:
+      - rag-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:8501/_stcore/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+    # 리소스 제한 (선택사항 - 환경에 맞게 조정)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+        reservations:
+          memory: 2G
+          cpus: "1.0"
+
+# 네트워크 정의
+networks:
+  rag-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 볼륨 정의
+volumes:
+  elasticsearch_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/elasticsearch_${INDEX_NAME:-unified_rag_prod}

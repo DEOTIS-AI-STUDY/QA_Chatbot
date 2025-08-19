@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAG 시스템 웹 인터페이스</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      .header {
+        background: linear-gradient(45deg, #667eea, #764ba2);
+        color: white;
+        padding: 30px;
+        text-align: center;
+      }
+
+      .header h1 {
+        font-size: 2.5em;
+        margin-bottom: 10px;
+      }
+
+      .header p {
+        font-size: 1.2em;
+        opacity: 0.9;
+      }
+
+      .main {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        padding: 30px;
+      }
+
+      .section {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 25px;
+        border: 1px solid #e9ecef;
+      }
+
+      .section h2 {
+        color: #495057;
+        margin-bottom: 20px;
+        font-size: 1.4em;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+        padding: 10px;
+        border-radius: 8px;
+        background: white;
+      }
+
+      .status-indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 10px;
+      }
+
+      .status-indicator.online {
+        background: #28a745;
+      }
+
+      .status-indicator.offline {
+        background: #dc3545;
+      }
+
+      .status-indicator.loading {
+        background: #ffc107;
+        animation: pulse 1.5s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #495057;
+      }
+
+      .form-group select,
+      .form-group input,
+      .form-group textarea {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border-color 0.3s;
+      }
+
+      .form-group select:focus,
+      .form-group input:focus,
+      .form-group textarea:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .btn {
+        background: linear-gradient(45deg, #667eea, #764ba2);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 600;
+        transition: transform 0.2s, box-shadow 0.2s;
+        margin-right: 10px;
+        margin-bottom: 10px;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+      }
+
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .chat {
+        grid-column: 1 / -1;
+        margin-top: 20px;
+      }
+
+      .chat-messages {
+        height: 400px;
+        overflow-y: auto;
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        padding: 20px;
+        background: white;
+        margin-bottom: 20px;
+      }
+
+      .message {
+        margin-bottom: 20px;
+        padding: 15px;
+        border-radius: 10px;
+        max-width: 80%;
+      }
+
+      .message.user {
+        background: #667eea;
+        color: white;
+        margin-left: auto;
+        text-align: right;
+      }
+
+      .message.bot {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+      }
+
+      .message .timestamp {
+        font-size: 0.8em;
+        opacity: 0.7;
+        margin-top: 5px;
+      }
+
+      .chat-input {
+        display: flex;
+        gap: 10px;
+      }
+
+      .chat-input input {
+        flex: 1;
+        padding: 12px;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        font-size: 16px;
+      }
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+        margin-top: 15px;
+      }
+
+      .info-card {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+      }
+
+      .info-card h4 {
+        color: #495057;
+        margin-bottom: 8px;
+      }
+
+      .info-card p {
+        color: #6c757d;
+        font-size: 0.9em;
+      }
+
+      .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #667eea;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (max-width: 768px) {
+        .main {
+          grid-template-columns: 1fr;
+        }
+
+        .header h1 {
+          font-size: 2em;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🤖 RAG 시스템</h1>
+        <p>BGE-M3 임베딩 + Elasticsearch + 멀티 LLM</p>
+      </div>
+
+      <div class="main">
+        <!-- 시스템 상태 -->
+        <div class="section">
+          <h2>📊 시스템 상태</h2>
+          <div class="status" id="apiStatus">
+            <div class="status-indicator offline"></div>
+            <span>API 서버 연결 확인 중...</span>
+          </div>
+          <div class="status" id="ragStatus">
+            <div class="status-indicator offline"></div>
+            <span>RAG 시스템 미초기화</span>
+          </div>
+          <div class="status" id="esStatus">
+            <div class="status-indicator offline"></div>
+            <span>Elasticsearch 확인 중...</span>
+          </div>
+
+          <div class="info-grid" id="systemInfo" style="display: none">
+            <div class="info-card">
+              <h4>현재 모델</h4>
+              <p id="currentModel">-</p>
+            </div>
+            <div class="info-card">
+              <h4>Top-K</h4>
+              <p id="currentTopK">-</p>
+            </div>
+            <div class="info-card">
+              <h4>활성 세션</h4>
+              <p id="activeSessions">-</p>
+            </div>
+            <div class="info-card">
+              <h4>초기화 시간</h4>
+              <p id="initTime">-</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 시스템 제어 -->
+        <div class="section">
+          <h2>⚙️ 시스템 제어</h2>
+
+          <div class="form-group">
+            <label for="modelSelect">LLM 모델 선택</label>
+            <select id="modelSelect">
+              <option value="">모델 로딩 중...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="topKInput">Top-K (검색 결과 수)</label>
+            <input type="number" id="topKInput" value="5" min="1" max="20" />
+          </div>
+
+          <button class="btn" id="initBtn" onclick="initializeSystem()">
+            <span id="initBtnText">시스템 초기화</span>
+          </button>
+
+          <button class="btn" onclick="checkStatus()">상태 새로고침</button>
+
+          <button class="btn" onclick="clearHistory()">대화 기록 삭제</button>
+        </div>
+
+        <!-- 채팅 인터페이스 -->
+        <div class="section chat">
+          <h2>💬 채팅</h2>
+          <div class="chat-messages" id="chatMessages"></div>
+          <div class="chat-input">
+            <input
+              type="text"
+              id="queryInput"
+              placeholder="질문을 입력하세요..."
+              onkeypress="handleKeyPress(event)"
+            />
+            <button class="btn" onclick="sendQuery()">전송</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = "http://127.0.0.1:8080";
+      let currentSessionId = "web_session_" + Date.now();
+
+      // 페이지 로드 시 초기화
+      document.addEventListener("DOMContentLoaded", function () {
+        checkAPIConnection();
+        loadAvailableModels();
+        checkStatus();
+      });
+
+      // API 연결 확인
+      async function checkAPIConnection() {
+        try {
+          const response = await fetch(`${API_BASE}/health`);
+          const data = await response.json();
+          updateStatus("apiStatus", true, "API 서버 연결됨");
+        } catch (error) {
+          updateStatus("apiStatus", false, "API 서버 연결 실패");
+        }
+      }
+
+      // 사용 가능한 모델 로드
+      async function loadAvailableModels() {
+        try {
+          const response = await fetch(`${API_BASE}/models`);
+          const data = await response.json();
+
+          const select = document.getElementById("modelSelect");
+          select.innerHTML = "";
+
+          if (data.models && Object.keys(data.models).length > 0) {
+            Object.entries(data.models).forEach(([key, model]) => {
+              const option = document.createElement("option");
+              option.value = key;
+              option.textContent = model.name;
+              select.appendChild(option);
+            });
+          } else {
+            select.innerHTML =
+              '<option value="">사용 가능한 모델 없음</option>';
+          }
+        } catch (error) {
+          console.error("모델 로드 실패:", error);
+          document.getElementById("modelSelect").innerHTML =
+            '<option value="">모델 로드 실패</option>';
+        }
+      }
+
+      // 시스템 상태 확인
+      async function checkStatus() {
+        try {
+          // RAG 시스템 상태
+          const statusResponse = await fetch(`${API_BASE}/status`);
+          const statusData = await statusResponse.json();
+
+          if (statusData.is_initialized) {
+            updateStatus("ragStatus", true, "RAG 시스템 초기화됨");
+            document.getElementById("systemInfo").style.display = "grid";
+            document.getElementById("currentModel").textContent =
+              statusData.model || "-";
+            document.getElementById("currentTopK").textContent =
+              statusData.top_k || "-";
+            document.getElementById("activeSessions").textContent =
+              statusData.active_sessions || "0";
+            document.getElementById("initTime").textContent =
+              statusData.initialization_time
+                ? `${statusData.initialization_time.toFixed(2)}초`
+                : "-";
+          } else {
+            updateStatus("ragStatus", false, "RAG 시스템 미초기화");
+            document.getElementById("systemInfo").style.display = "none";
+          }
+
+          // 의존성 확인
+          const depsResponse = await fetch(`${API_BASE}/dependencies`);
+          if (depsResponse.ok) {
+            updateStatus("esStatus", true, "Elasticsearch 연결됨");
+          } else {
+            updateStatus("esStatus", false, "Elasticsearch 연결 실패");
+          }
+        } catch (error) {
+          console.error("상태 확인 실패:", error);
+        }
+      }
+
+      // 시스템 초기화
+      async function initializeSystem() {
+        const modelSelect = document.getElementById("modelSelect");
+        const topKInput = document.getElementById("topKInput");
+        const initBtn = document.getElementById("initBtn");
+        const initBtnText = document.getElementById("initBtnText");
+
+        if (!modelSelect.value) {
+          alert("모델을 선택해주세요.");
+          return;
+        }
+
+        initBtn.disabled = true;
+        initBtnText.innerHTML = '<span class="loading"></span> 초기화 중...';
+        updateStatus("ragStatus", "loading", "RAG 시스템 초기화 중...");
+
+        try {
+          const response = await fetch(`${API_BASE}/initialize`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: modelSelect.value,
+              top_k: parseInt(topKInput.value),
+            }),
+          });
+
+          const data = await response.json();
+
+          if (data.status === "success") {
+            updateStatus("ragStatus", true, "RAG 시스템 초기화 완료");
+            addMessage(
+              "시스템",
+              `✅ 초기화 완료! 모델: ${
+                data.model
+              }, 초기화 시간: ${data.initialization_time.toFixed(2)}초`,
+              "bot"
+            );
+            checkStatus();
+          } else {
+            updateStatus("ragStatus", false, `초기화 실패: ${data.message}`);
+            addMessage("시스템", `❌ 초기화 실패: ${data.message}`, "bot");
+          }
+        } catch (error) {
+          updateStatus("ragStatus", false, "초기화 오류");
+          addMessage("시스템", `❌ 초기화 오류: ${error.message}`, "bot");
+        } finally {
+          initBtn.disabled = false;
+          initBtnText.textContent = "시스템 초기화";
+        }
+      }
+
+      // 질의 전송
+      async function sendQuery() {
+        const queryInput = document.getElementById("queryInput");
+        const query = queryInput.value.trim();
+
+        if (!query) return;
+
+        // 사용자 메시지 추가
+        addMessage("사용자", query, "user");
+        queryInput.value = "";
+
+        // 로딩 메시지 추가
+        const loadingMessageId = addMessage(
+          "시스템",
+          "응답 생성 중...",
+          "bot",
+          true
+        );
+
+        try {
+          const response = await fetch(`${API_BASE}/query`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              query: query,
+              session_id: currentSessionId,
+            }),
+          });
+
+          const data = await response.json();
+
+          // 로딩 메시지 제거
+          removeMessage(loadingMessageId);
+
+          if (data.status === "success") {
+            addMessage("AI", data.answer, "bot");
+            if (data.processing_time) {
+              addMessage(
+                "시스템",
+                `처리 시간: ${data.processing_time.toFixed(2)}초`,
+                "bot"
+              );
+            }
+          } else {
+            addMessage("시스템", `❌ 오류: ${data.message}`, "bot");
+          }
+        } catch (error) {
+          removeMessage(loadingMessageId);
+          addMessage("시스템", `❌ 전송 오류: ${error.message}`, "bot");
+        }
+      }
+
+      // 대화 기록 삭제
+      async function clearHistory() {
+        if (confirm("대화 기록을 삭제하시겠습니까?")) {
+          try {
+            await fetch(`${API_BASE}/chat/history/${currentSessionId}`, {
+              method: "DELETE",
+            });
+            document.getElementById("chatMessages").innerHTML = "";
+            addMessage("시스템", "대화 기록이 삭제되었습니다.", "bot");
+          } catch (error) {
+            addMessage("시스템", `❌ 삭제 오류: ${error.message}`, "bot");
+          }
+        }
+      }
+
+      // 상태 업데이트
+      function updateStatus(elementId, status, message) {
+        const element = document.getElementById(elementId);
+        const indicator = element.querySelector(".status-indicator");
+        const text = element.querySelector("span");
+
+        indicator.className = "status-indicator";
+        if (status === true) {
+          indicator.classList.add("online");
+        } else if (status === "loading") {
+          indicator.classList.add("loading");
+        } else {
+          indicator.classList.add("offline");
+        }
+
+        text.textContent = message;
+      }
+
+      // 메시지 추가
+      function addMessage(sender, content, type, isLoading = false) {
+        const messagesContainer = document.getElementById("chatMessages");
+        const messageDiv = document.createElement("div");
+        const messageId = "msg_" + Date.now();
+
+        messageDiv.id = messageId;
+        messageDiv.className = `message ${type}`;
+        messageDiv.innerHTML = `
+                <strong>${sender}:</strong> ${content}
+                ${
+                  isLoading
+                    ? '<span class="loading" style="margin-left: 10px;"></span>'
+                    : ""
+                }
+                <div class="timestamp">${new Date().toLocaleTimeString()}</div>
+            `;
+
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        return messageId;
+      }
+
+      // 메시지 제거
+      function removeMessage(messageId) {
+        const messageElement = document.getElementById(messageId);
+        if (messageElement) {
+          messageElement.remove();
+        }
+      }
+
+      // 엔터 키 처리
+      function handleKeyPress(event) {
+        if (event.key === "Enter") {
+          sendQuery();
+        }
+      }
+
+      // 주기적 상태 업데이트 (30초마다)
+      setInterval(checkStatus, 30000);
+    </script>
+  </body>
+</html>

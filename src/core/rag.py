@@ -42,7 +42,7 @@ def check_ollama_connection() -> Tuple[bool, str]:
         return False, f"Ollama 연결 확인 중 오류: {str(e)}"
 
 
-def create_rag_chain(embeddings, llm_model, top_k: int = 3) -> Tuple[Union[RetrievalQA, None], Union[bool, str]]:
+def create_rag_chain(embeddings, llm_model, top_k: int = 3, callbacks=None) -> Tuple[Union[RetrievalQA, None], Union[bool, str]]:
     """RAG 체인 생성"""
     try:
         print("🚀 RAG 체인 생성 시작...")
@@ -175,13 +175,21 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3) -> Tuple[Union[Retri
         # QA 체인 생성 - 상세한 예외 처리
         try:
             print("⚙️ QA 체인 생성 중...")
-            qa_chain = RetrievalQA.from_chain_type(
-                llm=llm_model,
-                chain_type="stuff",
-                retriever=retriever,
-                chain_type_kwargs={"prompt": prompt},
-                return_source_documents=True
-            )
+            
+            # callbacks가 제공된 경우 포함
+            qa_kwargs = {
+                "llm": llm_model,
+                "chain_type": "stuff",
+                "retriever": retriever,
+                "chain_type_kwargs": {"prompt": prompt},
+                "return_source_documents": True
+            }
+            
+            if callbacks:
+                qa_kwargs["callbacks"] = callbacks
+                print(f"✅ Langfuse 콜백 추가됨")
+            
+            qa_chain = RetrievalQA.from_chain_type(**qa_kwargs)
             print("✅ QA 체인 생성 완료")
         except AttributeError as qa_attr_error:
             return None, f"QA 체인 생성 실패 - 속성 오류: {str(qa_attr_error)}\nLLM 모델이나 리트리버가 올바르지 않을 수 있습니다."

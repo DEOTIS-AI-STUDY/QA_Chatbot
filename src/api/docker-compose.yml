@@ -33,6 +33,9 @@ services:
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - PYTHONPATH=/app
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
     volumes:
       - ../core:/app/core:ro
       - ../utils:/app/utils:ro
@@ -83,11 +86,42 @@ services:
       - rag_network
     restart: unless-stopped
 
+  # 선택사항: 자체 호스팅 Langfuse (클라우드 대신 사용 시)
+  # langfuse-db:
+  #   image: postgres:15
+  #   container_name: langfuse_postgres
+  #   environment:
+  #     POSTGRES_DB: langfuse
+  #     POSTGRES_USER: langfuse
+  #     POSTGRES_PASSWORD: langfuse_password
+  #   volumes:
+  #     - langfuse_db_data:/var/lib/postgresql/data
+  #   networks:
+  #     - rag_network
+
+  # langfuse:
+  #   image: langfuse/langfuse:latest
+  #   container_name: langfuse_server
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     DATABASE_URL: postgresql://langfuse:langfuse_password@langfuse-db:5432/langfuse
+  #     NEXTAUTH_SECRET: your-secret-key-here
+  #     NEXTAUTH_URL: http://localhost:3000
+  #     SALT: your-salt-here
+  #   depends_on:
+  #     - langfuse-db
+  #   networks:
+  #     - rag_network
+  #   restart: unless-stopped
+
 volumes:
   elasticsearch_data:
     driver: local
   ollama_data:
     driver: local
+  # langfuse_db_data:
+  #   driver: local
 
 networks:
   rag_network:

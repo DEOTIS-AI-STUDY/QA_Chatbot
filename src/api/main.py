@@ -31,6 +31,7 @@ from core.models import ModelFactory
 from core.rag import create_rag_chain
 from core.chat_history import ChatHistoryManager
 from utils.elasticsearch import ElasticsearchManager
+from langfuse_config import get_langfuse_manager, get_langfuse_callback
 
 # Elasticsearch 가용성 확인
 try:
@@ -55,6 +56,9 @@ class FastAPIRAGSystem:
         self.llm_model = None
         self.model_choice = None
         self.top_k = 5
+        
+        # Langfuse 매니저 초기화
+        self.langfuse_manager = get_langfuse_manager()
         
         # 세션별 대화 기록 관리 (메모리 기반)
         self.session_managers = {}
@@ -132,11 +136,15 @@ class FastAPIRAGSystem:
                         "message": f"LLM 모델 로드 실패: {status}"
                     }
                 
-                # RAG 체인 생성 (올바른 매개변수 사용)
+                # RAG 체인 생성 (Langfuse 콜백 포함)
+                langfuse_callback = get_langfuse_callback()
+                callbacks = [langfuse_callback] if langfuse_callback else None
+                
                 self.rag_chain, success_or_error = create_rag_chain(
                     embeddings=self.embedding_model,
                     llm_model=self.llm_model,
-                    top_k=top_k
+                    top_k=top_k,
+                    callbacks=callbacks
                 )
                 
                 if self.rag_chain:
@@ -176,6 +184,16 @@ class FastAPIRAGSystem:
             try:
                 start_time = time.time()
                 
+                # Langfuse 트레이스 생성
+                trace = self.langfuse_manager.create_trace(
+                    name="rag_query",
+                    metadata={
+                        "session_id": session_id,
+                        "model": self.model_choice,
+                        "top_k": self.top_k
+                    }
+                )
+                
                 # 대화 기록 관리자 가져오기
                 chat_manager = self.get_chat_manager(session_id)
                 
@@ -195,6 +213,20 @@ class FastAPIRAGSystem:
                     # 대화 기록에 질문과 답변 추가
                     chat_manager.add_chat(query, answer)
                     
+                    # Langfuse에 결과 로그
+                    if trace:
+                        self.langfuse_manager.log_generation(
+                            trace_id=trace.id,
+                            name="rag_generation",
+                            input=query,
+                            output=answer,
+                            metadata={
+                                "processing_time": processing_time,
+                                "retrieved_docs_count": len(result.get('source_documents', [])),
+                                "model": self.model_choice
+                            }
+                        )
+                    
                     return {
                         "status": "success",
                         "answer": answer,
@@ -204,6 +236,17 @@ class FastAPIRAGSystem:
                         "retrieved_docs": result.get('source_documents', [])
                     }
                 else:
+                    # Langfuse에 에러 로그
+                    if trace:
+                        self.langfuse_manager.log_event(
+                            trace_id=trace.id,
+                            name="rag_error",
+                            metadata={
+                                "error": f"답변 생성 실패. 응답 구조: {result}",
+                                "processing_time": processing_time
+                            }
+                        )
+                    
                     return {
                         "status": "error",
                         "message": f"답변을 생성할 수 없습니다. 응답 구조: {result}",
@@ -211,6 +254,17 @@ class FastAPIRAGSystem:
                     }
                     
             except Exception as e:
+                # Langfuse에 예외 로그
+                if 'trace' in locals() and trace:
+                    self.langfuse_manager.log_event(
+                        trace_id=trace.id,
+                        name="rag_exception",
+                        metadata={
+                            "error": str(e),
+                            "processing_time": time.time() - start_time
+                        }
+                    )
+                
                 return {
                     "status": "error",
                     "message": f"질의 처리 오류: {str(e)}",
@@ -228,7 +282,8 @@ class FastAPIRAGSystem:
             "top_k": self.top_k,
             "initialization_time": self.initialization_time,
             "active_sessions": len(self.session_managers),
-            "available_models": self.model_factory.get_available_models()
+            "available_models": self.model_factory.get_available_models(),
+            "langfuse_status": self.langfuse_manager.get_status()
         }
 
 
@@ -388,6 +443,25 @@ async def delete_session(session_id: str):
         }
     else:
         raise HTTPException(status_code=404, detail=f"세션 '{session_id}'를 찾을 수 없습니다.")
+
+
+@app.get("/langfuse/status")
+async def get_langfuse_status():
+    """Langfuse 상태 확인"""
+    return rag_system.langfuse_manager.get_status()
+
+
+@app.post("/langfuse/flush")
+async def flush_langfuse():
+    """Langfuse 로그 강제 전송"""
+    try:
+        rag_system.langfuse_manager.flush()
+        return {
+            "status": "success",
+            "message": "Langfuse 로그가 전송되었습니다."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Langfuse flush 실패: {str(e)}")
 
 
 # 에러 핸들러

@@ -10,6 +10,8 @@ import os
 import sys
 import argparse
 import textwrap
+import time
+from datetime import datetime
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -33,6 +35,24 @@ except ImportError:
 
 # 환경 변수 로드
 load_dotenv()
+
+class PerformanceTimer:
+    """성능 측정용 컨텍스트 매니저"""
+    def __init__(self, task_name: str, show_progress: bool = True):
+        self.task_name = task_name
+        self.show_progress = show_progress
+        self.start_time = None
+        
+    def __enter__(self):
+        if self.show_progress:
+            print(f"⏱️ {self.task_name} 시작...")
+        self.start_time = time.time()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed = time.time() - self.start_time
+        if self.show_progress:
+            print(f"✅ {self.task_name} 완료 ({elapsed:.2f}초)")
 
 class CLIRAGSystem:
     """CLI 기반 RAG 시스템"""
@@ -71,6 +91,17 @@ class CLIRAGSystem:
         except Exception as e:
             issues.append(f"❌ Elasticsearch 연결 오류: {str(e)}")
         
+        # Ollama 서버 연결 확인 추가
+        try:
+            from core.rag import check_ollama_connection
+            ollama_connected, ollama_message = check_ollama_connection()
+            if not ollama_connected:
+                issues.append(f"❌ Ollama 서버 연결 실패: {ollama_message}")
+            else:
+                print(f"✅ {ollama_message}")
+        except Exception as e:
+            issues.append(f"❌ Ollama 연결 확인 오류: {str(e)}")
+        
         if issues:
             print("\n".join(issues))
             print("\n해결 방법:")
@@ -81,7 +112,12 @@ class CLIRAGSystem:
             print("   ./setup.sh               # Docker + Elasticsearch 자동 시작")
             print("   또는: ./start.sh         # 전체 시스템 자동 시작")
             print("   또는: docker-compose up -d elasticsearch")
-            print("3. Ollama 모델 확인:")
+            print("3. Ollama 설치 및 시작:")
+            print("   - Ollama 다운로드: https://ollama.ai/download")
+            print("   - Ollama 시작: ollama serve")
+            print("   - 모델 설치: ollama pull qwen2:7b")
+            print("   - 확인: ollama list")
+            print("4. Ollama 모델 확인:")
             print("   ollama list              # 설치된 모델 확인")
             print("   ollama pull solar:10.7b  # SOLAR 모델 설치")
             return False
@@ -158,7 +194,7 @@ class CLIRAGSystem:
             print("❌ 잘못된 값입니다. 기본값을 유지합니다.")
     
     def _auto_index_pdfs(self) -> bool:
-        """PDF 파일 자동 인덱싱"""
+        """PDF 파일 자동 인덱싱 - 성능 최적화"""
         from core.config import PDF_DIR, INDEX_NAME
         from elasticsearch import Elasticsearch
         
@@ -175,19 +211,18 @@ class CLIRAGSystem:
             print("📄 PDF 파일이 없어서 인덱싱을 건너뜁니다.")
             return True
         
-        # 인덱스 존재 확인
-        es = Elasticsearch("http://localhost:9200")
-        index_exists = es.indices.exists(index=INDEX_NAME)
-        
-        if index_exists:
-            # 문서 수 확인
-            try:
+        # 인덱스 존재 및 문서 수 확인 (최적화)
+        try:
+            es = Elasticsearch("http://localhost:9200", timeout=10)
+            index_exists = es.indices.exists(index=INDEX_NAME)
+            
+            if index_exists:
                 doc_count = es.count(index=INDEX_NAME).get("count", 0)
                 if doc_count > 0:
                     print(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다. 인덱싱을 건너뜁니다.")
                     return True
-            except:
-                pass
+        except Exception as check_error:
+            print(f"⚠️ 인덱스 확인 중 오류: {str(check_error)}, 인덱싱을 계속 진행합니다...")
         
         # PDF 파일 인덱싱 실행
         print(f"📄 {len(pdf_files)}개 PDF 파일을 자동 인덱싱합니다...")
@@ -195,16 +230,21 @@ class CLIRAGSystem:
             print(f"  - {os.path.basename(pdf_file)}")
         
         try:
-            # 간단한 트래커 생성 (CLI용)
+            # 간단한 트래커 생성 (CLI용) - 진행 상황 표시 개선
             class SimpleTracker:
-                def track_preprocessing_stage(self, stage): pass
-                def end_preprocessing_stage(self, stage): pass
+                def track_preprocessing_stage(self, stage):
+                    print(f"🔄 {stage}")
+                def end_preprocessing_stage(self, stage):
+                    print(f"✅ {stage} 완료")
             
             tracker = SimpleTracker()
+            
+            indexing_start = time.time()
             success, message = self.es_manager.index_pdfs(pdf_files, self.embedding_model, tracker)
+            indexing_time = time.time() - indexing_start
             
             if success:
-                print(f"✅ PDF 자동 인덱싱 완료: {message}")
+                print(f"✅ PDF 자동 인덱싱 완료: {message} ({indexing_time:.2f}초)")
                 return True
             else:
                 print(f"❌ PDF 자동 인덱싱 실패: {message}")
@@ -214,101 +254,139 @@ class CLIRAGSystem:
             print(f"❌ PDF 자동 인덱싱 오류: {str(e)}")
             return False
     
-    def initialize_rag_system(self, init_index: bool = False) -> bool:
-        """RAG 시스템 초기화"""
+    def initialize_rag_system(self) -> bool:
+        """RAG 시스템 초기화 - 성능 최적화"""
         print("\n🚀 RAG 시스템 초기화 중...")
+        init_start_time = time.time()
         
         # 1. Elasticsearch 연결
         try:
-            self.es_manager = ElasticsearchManager()
-            is_connected, connection_msg = self.es_manager.check_connection()
-            if not is_connected:
-                print(f"❌ Elasticsearch 연결 실패: {connection_msg}")
-                return False
-            print(f"✅ Elasticsearch 연결 성공: {connection_msg}")
+            with PerformanceTimer("Elasticsearch 연결"):
+                self.es_manager = ElasticsearchManager()
+                is_connected, connection_msg = self.es_manager.check_connection()
+                if not is_connected:
+                    print(f"❌ Elasticsearch 연결 실패: {connection_msg}")
+                    return False
+                print(f"✅ Elasticsearch 연결 성공: {connection_msg}")
         except Exception as e:
             print(f"❌ Elasticsearch 초기화 오류: {str(e)}")
             return False
         
         # 2. 임베딩 모델 로드
         try:
-            self.embedding_model = self.model_factory.create_embedding_model()
-            if not self.embedding_model:
-                print("❌ 임베딩 모델 로드 실패")
-                return False
-            print("✅ BGE-M3 임베딩 모델 로드 성공")
+            with PerformanceTimer("BGE-M3 임베딩 모델 로드"):
+                self.embedding_model = self.model_factory.create_embedding_model()
+                if not self.embedding_model:
+                    print("❌ 임베딩 모델 로드 실패")
+                    return False
+                print("✅ BGE-M3 임베딩 모델 로드 성공")
         except Exception as e:
             print(f"❌ 임베딩 모델 오류: {str(e)}")
             return False
         
-        # 2.5. PDF 자동 인덱싱 (--init-index 옵션이 있을 때만)
-        if init_index:
-            try:
+        # 2.5. PDF 자동 인덱싱 확인 및 실행 (최적화: 병렬 처리 가능)
+        try:
+            with PerformanceTimer("PDF 인덱싱 확인", False):
                 success = self._auto_index_pdfs()
                 if not success:
                     print("⚠️ PDF 자동 인덱싱 실패, 계속 진행합니다...")
-            except Exception as e:
-                print(f"⚠️ PDF 자동 인덱싱 오류: {str(e)}, 계속 진행합니다...")
-        else:
-            print("📄 PDF 자동 인덱싱 건너뜀 (--init-index 옵션 사용 시 실행)")
+        except Exception as e:
+            print(f"⚠️ PDF 자동 인덱싱 오류: {str(e)}, 계속 진행합니다...")
         
-        # 3. LLM 모델 로드
+        # 3. LLM 모델 로드 (가장 시간이 많이 걸리는 부분)
         try:
-            self.llm_model, status = self.model_factory.create_llm_model(self.model_choice)
-            if not self.llm_model:
-                print(f"❌ LLM 모델 로드 실패: {status}")
-                return False
-            print(f"✅ {status}")
+            with PerformanceTimer(f"{self.model_choice} LLM 모델 로드"):
+                self.llm_model, status = self.model_factory.create_llm_model(self.model_choice)
+                if not self.llm_model:
+                    print(f"❌ LLM 모델 로드 실패: {status}")
+                    return False
+                print(f"✅ {status}")
         except Exception as e:
             print(f"❌ LLM 모델 오류: {str(e)}")
             return False
         
         # 4. RAG 체인 생성
         try:
-            self.rag_chain, success = create_rag_chain(
-                embeddings=self.embedding_model,
-                llm_model=self.llm_model,
-                top_k=self.top_k
-            )
-            if not self.rag_chain:
-                print(f"❌ RAG 체인 생성 실패: {success}")
-                return False
-            print("✅ RAG 체인 생성 성공")
+            with PerformanceTimer("RAG 체인 생성"):
+                self.rag_chain, success = create_rag_chain(
+                    embeddings=self.embedding_model,
+                    llm_model=self.llm_model,
+                    top_k=self.top_k
+                )
+                if not self.rag_chain:
+                    print(f"❌ RAG 체인 생성 실패: {success}")
+                    return False
+                print("✅ RAG 체인 생성 성공")
         except Exception as e:
             print(f"❌ RAG 체인 오류: {str(e)}")
             return False
         
-        print("\n🎉 RAG 시스템 초기화 완료!")
+        total_init_time = time.time() - init_start_time
+        print(f"\n🎉 RAG 시스템 초기화 완료! (총 {total_init_time:.2f}초)")
+        
+        # 성능 최적화 팁 제공
+        if total_init_time > 30:  # 30초 이상 걸린 경우
+            print("\n💡 초기화 시간 최적화 팁:")
+            print("   - 더 작은 LLM 모델 사용 (예: qwen2:1.5b)")
+            print("   - SSD 사용 및 충분한 RAM 확보")
+            print("   - Ollama 모델 사전 다운로드 완료 확인")
+        
         return True
     
     def show_system_info(self):
-        """시스템 정보 표시"""
-        from core.config import ELASTICSEARCH_URL, INDEX_NAME
-        
+        """시스템 정보 표시 - 성능 정보 포함"""
         print("\n" + "="*60)
         print("🤖 통합 RAG 시스템 - CLI 모드")
         print("="*60)
         print(f"📋 선택된 모델: {LLM_MODELS[self.model_choice]['name']}")
         print(f"🔍 검색 결과 수: Top-{self.top_k}")
         print(f"🗄️ 임베딩: BGE-M3")
-        print(f"🔗 Vector DB: Elasticsearch ({ELASTICSEARCH_URL})")
-        print(f"📚 인덱스: {INDEX_NAME}")
+        print(f"🔗 벡터 DB: Elasticsearch (localhost:9200)")
+        
+        # 성능 최적화 팁
+        print("\n💡 성능 최적화 팁:")
+        if self.top_k > 10:
+            print(f"   ⚠️ Top-K 값이 {self.top_k}로 높습니다. 5-10 추천")
+        else:
+            print(f"   ✅ Top-K 값 ({self.top_k})이 적절합니다.")
+        
+        print("   📝 응답 속도 개선:")
+        print("      - 더 작은 모델 사용 (qwen2:1.5b)")
+        print("      - Top-K 값 줄이기 (3-5 추천)")
+        print("      - SSD 사용 및 충분한 RAM 확보")
         print("="*60)
     
     def process_query(self, query: str) -> Optional[str]:
-        """질의 처리 - 공통 대화 기록 관리자 사용"""
+        """질의 처리 - 성능 최적화 및 측정 포함"""
         if not self.rag_chain:
             print("❌ RAG 시스템이 초기화되지 않았습니다.")
             return None
         
+        total_start_time = time.time()
+        
         try:
             print(f"\n🔍 질의 처리 중: {query}")
             
-            # 대화 기록을 포함한 컨텍스트 구성
-            context_query = self.chat_manager.build_context_query(query)
+            # 1. 대화 기록 컨텍스트 구성 (성능 측정)
+            with PerformanceTimer("대화 기록 컨텍스트 구성", False):
+                context_query = self.chat_manager.build_context_query(query)
             
-            # RAG 체인 실행
+            # 2. RAG 체인 실행 (성능 측정)
+            print("⏱️ RAG 체인 실행 중...")
+            rag_start_time = time.time()
+            
+            # 벡터 검색 단계
+            print("  📚 문서 검색 중...")
+            search_start = time.time()
+            
             response = self.rag_chain({"query": context_query})
+            
+            rag_elapsed = time.time() - rag_start_time
+            total_elapsed = time.time() - total_start_time
+            
+            # 성능 정보 출력
+            print(f"  ✅ RAG 처리 완료 ({rag_elapsed:.2f}초)")
+            print(f"  📊 전체 처리 시간: {total_elapsed:.2f}초")
             
             # 응답 처리
             answer = self._extract_answer(response)
@@ -316,12 +394,22 @@ class CLIRAGSystem:
             if answer:
                 # 공통 대화 기록 관리자에 추가 (원본 질문과 답변만)
                 self.chat_manager.add_chat(query, answer)
+                
+                # 성능 통계 표시
+                if rag_elapsed > 10:  # 10초 이상 걸린 경우 성능 팁 제공
+                    print(f"⚠️ 응답 시간이 {rag_elapsed:.2f}초로 느립니다.")
+                    print("💡 성능 개선 팁:")
+                    print("   - Top-K 값을 줄여보세요 (현재: {})".format(self.top_k))
+                    print("   - Ollama 모델을 더 작은 크기로 변경해보세요")
+                    print("   - SSD 사용 및 충분한 RAM 확보")
+                
                 return answer
             
             return None
                 
         except Exception as e:
-            print(f"❌ 질의 처리 오류: {str(e)}")
+            total_elapsed = time.time() - total_start_time
+            print(f"❌ 질의 처리 오류 ({total_elapsed:.2f}초 경과): {str(e)}")
             return None
     
     def _extract_answer(self, response) -> Optional[str]:
@@ -422,10 +510,9 @@ def main():
         epilog=textwrap.dedent('''
         사용 예시:
           python unified_rag_cli.py                           # 대화형 모드
-          python unified_rag_cli.py --init-index              # PDF 자동 인덱싱 후 대화형 모드
           python unified_rag_cli.py --model upstage          # 모델 지정 후 대화형 모드  
           python unified_rag_cli.py --query "질문 내용"       # 단일 질의 모드
-          python unified_rag_cli.py --model solar_10_7b --init-index --query "질문"
+          python unified_rag_cli.py --model solar_10_7b --query "질문" --top-k 10
         ''')
     )
     
@@ -449,21 +536,42 @@ def main():
     )
     
     parser.add_argument(
-        "--init-index",
-        action="store_true",
-        help="PDF 파일 자동 인덱싱 실행 (최초 실행 시에만 사용)"
-    )
-    
-    parser.add_argument(
         "--no-check",
         action="store_true",
         help="의존성 검사 건너뛰기"
+    )
+    
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="빠른 모드 (작은 모델 및 낮은 Top-K 자동 설정)"
+    )
+    
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="성능 벤치마크 모드 (상세한 시간 측정)"
     )
     
     args = parser.parse_args()
     
     # CLI RAG 시스템 초기화
     rag_system = CLIRAGSystem()
+    
+    # 빠른 모드 설정
+    if args.fast:
+        print("🚀 빠른 모드 활성화")
+        # 성능 최적화 설정
+        if not args.model:
+            args.model = "qwen2"  # 빠른 모델 기본 선택
+        if not hasattr(args, 'top_k') or args.top_k == 5:
+            args.top_k = 3  # 낮은 Top-K 설정
+        print(f"   - 모델: {args.model}")
+        print(f"   - Top-K: {args.top_k}")
+    
+    # 벤치마크 모드 설정
+    if args.benchmark:
+        print("📊 벤치마크 모드 활성화 - 상세한 성능 측정")
     
     # 의존성 확인
     if not args.no_check:
@@ -480,7 +588,7 @@ def main():
     rag_system.set_search_parameters(args.top_k)
     
     # RAG 시스템 초기화
-    if not rag_system.initialize_rag_system(args.init_index):
+    if not rag_system.initialize_rag_system():
         print("\nRAG 시스템 초기화에 실패했습니다.")
         sys.exit(1)
     

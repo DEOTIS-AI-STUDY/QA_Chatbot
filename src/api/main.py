@@ -179,19 +179,21 @@ class FastAPIRAGSystem:
                 # 대화 기록 관리자 가져오기
                 chat_manager = self.get_chat_manager(session_id)
                 
-                # 대화 기록에 사용자 질문 추가
-                chat_manager.add_user_message(query)
-                
                 # RAG 체인을 통한 답변 생성
-                result = self.rag_chain.invoke({"question": query})
+                result = self.rag_chain.invoke({"query": query})
+                
+                # 디버깅: 실제 응답 구조 출력
+                print(f"🔍 RAG 체인 응답 구조: {result}")
+                print(f"🔍 응답 키들: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
                 
                 processing_time = time.time() - start_time
                 
-                if result and 'answer' in result:
-                    answer = result['answer']
+                # RetrievalQA는 'result' 키를 사용함
+                if result and ('answer' in result or 'result' in result):
+                    answer = result.get('answer') or result.get('result')
                     
-                    # 대화 기록에 AI 답변 추가
-                    chat_manager.add_ai_message(answer)
+                    # 대화 기록에 질문과 답변 추가
+                    chat_manager.add_chat(query, answer)
                     
                     return {
                         "status": "success",
@@ -204,7 +206,7 @@ class FastAPIRAGSystem:
                 else:
                     return {
                         "status": "error",
-                        "message": "답변을 생성할 수 없습니다.",
+                        "message": f"답변을 생성할 수 없습니다. 응답 구조: {result}",
                         "processing_time": processing_time
                     }
                     

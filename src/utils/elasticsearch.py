@@ -3,32 +3,53 @@ Elasticsearch 관련 유틸리티
 """
 import os
 import urllib3
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict, Any
 from elasticsearch import Elasticsearch
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import ElasticsearchStore
-from core.config import ELASTICSEARCH_URL, INDEX_NAME
+from core.config import (
+    ELASTICSEARCH_URL, 
+    ELASTICSEARCH_HOST, 
+    ELASTICSEARCH_PORT, 
+    ELASTICSEARCH_SCHEME,
+    ELASTICSEARCH_USERNAME,
+    ELASTICSEARCH_PASSWORD,
+    INDEX_NAME
+)
 
 
 class ElasticsearchManager:
     """Elasticsearch 관리 클래스"""
     
     @staticmethod
+    def get_connection_config() -> Dict[str, Any]:
+        """Elasticsearch 연결 설정 생성"""
+        config = {
+            "hosts": [ELASTICSEARCH_URL],
+            "verify_certs": False,
+            "ssl_show_warn": False,
+            "request_timeout": 30,
+            "max_retries": 3,
+            "retry_on_timeout": True
+        }
+        
+        # 인증 정보가 있으면 추가
+        if ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD:
+            config["basic_auth"] = (ELASTICSEARCH_USERNAME, ELASTICSEARCH_PASSWORD)
+        
+        return config
+    
+    @staticmethod
     def check_connection() -> Tuple[bool, str]:
         """Elasticsearch 연결 확인 (개선된 버전)"""
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
-        # 다양한 연결 방법 시도
-        connection_configs = [
-            {
-                "hosts": [ELASTICSEARCH_URL],
-                "verify_certs": False,
-                "ssl_show_warn": False,
-                "request_timeout": 30,
-                "max_retries": 3,
-                "retry_on_timeout": True
-            },
+        # 주 연결 설정
+        main_config = ElasticsearchManager.get_connection_config()
+        
+        # 대체 연결 방법들
+        fallback_configs = [
             {
                 "hosts": ["http://localhost:9200"],
                 "verify_certs": False,
@@ -41,17 +62,29 @@ class ElasticsearchManager:
             }
         ]
         
-        for i, config in enumerate(connection_configs):
+        # 모든 설정을 합쳐서 시도
+        all_configs = [main_config] + fallback_configs
+        
+        for i, config in enumerate(all_configs):
             try:
                 es = Elasticsearch(**config)
                 if es.ping():
                     cluster_info = es.info()
                     version = cluster_info.get('version', {}).get('number', 'Unknown')
-                    return True, f"연결 성공 (v{version}) - 방법 {i+1}"
-            except Exception:
+                    cluster_name = cluster_info.get('cluster_name', 'Unknown')
+                    host_info = config["hosts"][0]
+                    return True, f"연결 성공 ({cluster_name} v{version}) - {host_info}"
+            except Exception as e:
+                if i == 0:  # 주 연결 실패 시에만 에러 정보 기록
+                    last_error = str(e)
                 continue
         
-        return False, "모든 연결 방법 실패. Elasticsearch가 실행 중인지 확인하세요."
+        error_msg = f"모든 연결 방법 실패"
+        if 'last_error' in locals():
+            error_msg += f" (주 연결 오류: {last_error})"
+        error_msg += ". Elasticsearch가 실행 중인지 확인하세요."
+        
+        return False, error_msg
     
     @staticmethod
     def get_safe_elasticsearch_client() -> Tuple[Elasticsearch, bool, str]:
@@ -104,7 +137,8 @@ class ElasticsearchManager:
         hybrid_tracker.track_preprocessing_stage("PDF_인덱싱_시작")
         
         # 기존 인덱스 삭제
-        es = Elasticsearch(ELASTICSEARCH_URL)
+        config = ElasticsearchManager.get_connection_config()
+        es = Elasticsearch(**config)
         if es.indices.exists(index=INDEX_NAME):
             es.indices.delete(index=INDEX_NAME)
         

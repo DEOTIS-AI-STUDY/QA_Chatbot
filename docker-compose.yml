@@ -37,4 +37,4 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ./data/elasticsearch_${INDEX_NAME:-unified_rag}
+      device: ./data/elasticsearch_${INDEX_NAME}

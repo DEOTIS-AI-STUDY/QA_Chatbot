@@ -283,13 +283,16 @@ class CLIRAGSystem:
     
     def show_system_info(self):
         """시스템 정보 표시"""
+        from core.config import ELASTICSEARCH_URL, INDEX_NAME
+        
         print("\n" + "="*60)
         print("🤖 통합 RAG 시스템 - CLI 모드")
         print("="*60)
         print(f"📋 선택된 모델: {LLM_MODELS[self.model_choice]['name']}")
         print(f"🔍 검색 결과 수: Top-{self.top_k}")
         print(f"🗄️ 임베딩: BGE-M3")
-        print(f"🔗 벡터 DB: Elasticsearch (localhost:9200)")
+        print(f"🔗 Vector DB: Elasticsearch ({ELASTICSEARCH_URL})")
+        print(f"📚 인덱스: {INDEX_NAME}")
         print("="*60)
     
     def process_query(self, query: str) -> Optional[str]:

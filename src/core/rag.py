@@ -28,7 +28,7 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3) -> Tuple[Union[Retri
         
         # Elasticsearch 벡터스토어 연결
         try:
-            # 가장 기본적인 방법으로 시도
+            # ElasticsearchStore에 인증이 포함된 URL 사용
             vectorstore = ElasticsearchStore(
                 embedding=embeddings,
                 index_name=INDEX_NAME,

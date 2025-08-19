@@ -116,11 +116,26 @@ class FastAPIRAGSystem:
                 # Elasticsearch 관리자 초기화
                 self.es_manager = ElasticsearchManager()
                 
-                # RAG 체인 생성
-                self.rag_chain = create_rag_chain(
-                    es_manager=self.es_manager,
-                    model_factory=self.model_factory,
-                    model_choice=model_choice,
+                # 임베딩 모델 로드
+                self.embedding_model = self.model_factory.create_embedding_model()
+                if not self.embedding_model:
+                    return {
+                        "status": "error",
+                        "message": "임베딩 모델 로드 실패"
+                    }
+                
+                # LLM 모델 로드
+                self.llm_model, status = self.model_factory.create_llm_model(model_choice)
+                if not self.llm_model:
+                    return {
+                        "status": "error",
+                        "message": f"LLM 모델 로드 실패: {status}"
+                    }
+                
+                # RAG 체인 생성 (올바른 매개변수 사용)
+                self.rag_chain, success_or_error = create_rag_chain(
+                    embeddings=self.embedding_model,
+                    llm_model=self.llm_model,
                     top_k=top_k
                 )
                 
@@ -137,7 +152,7 @@ class FastAPIRAGSystem:
                 else:
                     return {
                         "status": "error",
-                        "message": "RAG 시스템 초기화 실패"
+                        "message": f"RAG 체인 생성 실패: {success_or_error}"
                     }
                     
             except Exception as e:

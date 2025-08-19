@@ -37,10 +37,29 @@ simple_pdf_chatbot/
 
 ## Usage
 
+### Web Interface (Streamlit)
+
 1. **Upload PDF**: Use the sidebar to upload a PDF document
 2. **Process**: Click "PDF 처리" to extract and vectorize content
 3. **Ask Questions**: Use the chat interface to ask questions about the document
 4. **View Sources**: Expand "참고 문서" to see source passages
+
+### CLI Interface
+
+For command-line usage, use the CLI version:
+
+```bash
+# First-time setup with PDF indexing
+python src/unified_rag_cli.py --init-index
+
+# Interactive chat mode
+python src/unified_rag_cli.py --model solar_10_7b
+
+# Single query mode
+python src/unified_rag_cli.py --query "Your question here"
+```
+
+See `docs/cli_rag_usage_guide.md` for detailed CLI usage instructions.
 
 ## Features
 

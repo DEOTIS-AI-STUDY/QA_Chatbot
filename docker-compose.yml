@@ -9,6 +9,8 @@ services:
       - discovery.type=single-node
       - ELASTIC_PASSWORD=1234
       - xpack.security.enabled=false
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
       - esnet
   kibana:
@@ -28,3 +30,11 @@ services:
 networks:
   esnet:
     driver: bridge
+
+volumes:
+  elasticsearch_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/elasticsearch_${INDEX_NAME}

@@ -9,9 +9,21 @@ load_dotenv()
 
 # ===== Elasticsearch 설정 =====
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+ELASTICSEARCH_HOST = os.getenv("ELASTICSEARCH_HOST", "localhost")
+ELASTICSEARCH_PORT = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
+ELASTICSEARCH_SCHEME = os.getenv("ELASTICSEARCH_SCHEME", "http")
+ELASTICSEARCH_USERNAME = os.getenv("ELASTICSEARCH_USERNAME", None)
+ELASTICSEARCH_PASSWORD = os.getenv("ELASTICSEARCH_PASSWORD", None)
 INDEX_NAME = os.getenv("INDEX_NAME", "unified_rag")
 PDF_DIR = os.getenv("PDF_DIR", "pdf")
 LANGCHAIN_ENDPOINT = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
+
+# Elasticsearch URL 자동 구성 (개별 설정이 있으면 우선 사용)
+if not os.getenv("ELASTICSEARCH_URL") and os.getenv("ELASTICSEARCH_HOST"):
+    auth_part = ""
+    if ELASTICSEARCH_USERNAME and ELASTICSEARCH_PASSWORD:
+        auth_part = f"{ELASTICSEARCH_USERNAME}:{ELASTICSEARCH_PASSWORD}@"
+    ELASTICSEARCH_URL = f"{ELASTICSEARCH_SCHEME}://{auth_part}{ELASTICSEARCH_HOST}:{ELASTICSEARCH_PORT}"
 
 # ===== BGE-M3 임베딩 모델 설정 =====
 BGE_MODEL_NAME = "BAAI/bge-m3"

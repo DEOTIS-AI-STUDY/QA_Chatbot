@@ -3,6 +3,9 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 pydantic>=2.4.0
 
+# CORS 및 정적 파일 처리
+python-multipart>=0.0.6
+
 # ===== 기본 의존성 =====
 python-dotenv==1.1.1
 tqdm>=4.65.0
@@ -28,11 +31,21 @@ elasticsearch==8.11.0
 # ===== PDF 및 문서 처리 =====
 pypdf>=3.0.0
 
-# ===== 임베딩 및 ML =====
-sentence-transformers==5.1.0
+# ===== 임베딩 및 ML (C++ 빌드 문제 해결) =====
+# sentence-transformers와 호환되는 안정 버전 사용
+sentence-transformers>=2.2.2,<3.0.0
 
-# BGE 임베딩 모델 (FlagEmbedding)
-FlagEmbedding>=1.2.0
+# BGE 임베딩 모델 - 안정 버전으로 변경 (zlib-state 의존성 문제 회피)
+# FlagEmbedding>=1.2.0  # C++ 빌드 도구 필요로 인해 주석 처리
+# 대신 sentence-transformers로 BGE 모델 직접 사용
+
+# Hugging Face 모델 허브 접근용
+huggingface-hub>=0.16.0
+transformers>=4.21.0
+
+# 수치 계산 라이브러리
+numpy>=1.21.0
+torch>=1.9.0
 
 # ===== 모니터링 =====
 langsmith>=0.1.0

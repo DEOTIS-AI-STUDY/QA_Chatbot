@@ -5,8 +5,7 @@ FastAPI RAG 시스템 클라이언트 예제
 
 import asyncio
 import aiohttp
-import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 class RAGAPIClient:

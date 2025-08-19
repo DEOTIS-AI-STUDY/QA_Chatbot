@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FastAPI 기반 통합 RAG 시스템
-- CLI와 Streamlit의 core 로직 재사용
+- unified_rag_cli.py와 동일한 core 모듈 import 방식 사용
 - RESTful API 제공
 - 비동기 처리 지원
 """
@@ -9,34 +9,43 @@ FastAPI 기반 통합 RAG 시스템
 import os
 import sys
 import time
-import asyncio
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
+import asyncio
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
 # 프로젝트 경로 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(current_dir))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
 
-# 기존 모듈 임포트
+# unified_rag_cli.py와 동일한 모듈 import 방식
 from core.config import LLM_MODELS, HUGGINGFACE_EMBEDDINGS_AVAILABLE, UPSTAGE_AVAILABLE, OLLAMA_AVAILABLE
 from core.models import ModelFactory
 from core.rag import create_rag_chain
 from core.chat_history import ChatHistoryManager
 from utils.elasticsearch import ElasticsearchManager
 
+# Elasticsearch 가용성 확인
+try:
+    from elasticsearch import Elasticsearch
+    ELASTICSEARCH_AVAILABLE = True
+except ImportError:
+    ELASTICSEARCH_AVAILABLE = False
+    print("⚠️ Elasticsearch가 설치되지 않았습니다. pip install elasticsearch")
+
 # 전역 RAG 시스템 인스턴스
 rag_system = None
 
 
-class RAGSystemManager:
-    """RAG 시스템 관리자 - FastAPI용"""
+class FastAPIRAGSystem:
+    """FastAPI용 RAG 시스템 - unified_rag_cli.py와 동일한 로직"""
     
     def __init__(self):
         self.es_manager = None
@@ -46,11 +55,11 @@ class RAGSystemManager:
         self.llm_model = None
         self.model_choice = None
         self.top_k = 5
-        self.is_initialized = False
-        self.initialization_time = None
         
         # 세션별 대화 기록 관리 (메모리 기반)
         self.session_managers = {}
+        self.is_initialized = False
+        self.initialization_time = None
     
     def get_chat_manager(self, session_id: str = "default") -> ChatHistoryManager:
         """세션별 대화 기록 관리자 반환"""
@@ -58,148 +67,140 @@ class RAGSystemManager:
             self.session_managers[session_id] = ChatHistoryManager(max_history=10)
         return self.session_managers[session_id]
     
-    async def check_dependencies(self) -> Dict[str, Any]:
-        """의존성 확인 (비동기)"""
-        issues = []
-        
-        if not HUGGINGFACE_EMBEDDINGS_AVAILABLE:
-            issues.append("HuggingFace 임베딩 라이브러리가 설치되지 않았습니다.")
-        
-        # Elasticsearch 서버 연결 확인
-        try:
-            es_manager = ElasticsearchManager()
-            is_connected, connection_msg = es_manager.check_connection()
-            if not is_connected:
-                issues.append(f"Elasticsearch 서버 연결 실패: {connection_msg}")
-        except Exception as e:
-            issues.append(f"Elasticsearch 연결 오류: {str(e)}")
-        
-        # Ollama 서버 연결 확인
-        try:
-            from core.rag import check_ollama_connection
-            ollama_connected, ollama_message = check_ollama_connection()
-            if not ollama_connected:
-                issues.append(f"Ollama 서버 연결 실패: {ollama_message}")
-        except Exception as e:
-            issues.append(f"Ollama 연결 확인 오류: {str(e)}")
-        
-        return {
-            "status": "ok" if not issues else "error",
-            "issues": issues,
-            "available_models": self.model_factory.get_available_models()
-        }
-    
-    async def initialize_rag_system(self, model_choice: str, top_k: int = 5) -> Dict[str, Any]:
-        """RAG 시스템 초기화 (비동기)"""
-        start_time = time.time()
-        
-        try:
-            # 1. Elasticsearch 연결
-            self.es_manager = ElasticsearchManager()
-            is_connected, connection_msg = self.es_manager.check_connection()
-            if not is_connected:
-                raise Exception(f"Elasticsearch 연결 실패: {connection_msg}")
+    async def check_dependencies_async(self) -> Dict[str, Any]:
+        """의존성 확인 (비동기 버전)"""
+        def _check_dependencies():
+            issues = []
             
-            # 2. 임베딩 모델 로드
-            self.embedding_model = self.model_factory.create_embedding_model()
-            if not self.embedding_model:
-                raise Exception("임베딩 모델 로드 실패")
+            if not ELASTICSEARCH_AVAILABLE:
+                issues.append("Elasticsearch 라이브러리가 설치되지 않았습니다.")
             
-            # 3. LLM 모델 로드
-            self.llm_model, status = self.model_factory.create_llm_model(model_choice)
-            if not self.llm_model:
-                raise Exception(f"LLM 모델 로드 실패: {status}")
+            if not HUGGINGFACE_EMBEDDINGS_AVAILABLE:
+                issues.append("HuggingFace 임베딩 라이브러리가 설치되지 않았습니다.")
             
-            # 4. RAG 체인 생성
-            self.rag_chain, success = create_rag_chain(
-                embeddings=self.embedding_model,
-                llm_model=self.llm_model,
-                top_k=top_k
-            )
-            if not self.rag_chain:
-                raise Exception(f"RAG 체인 생성 실패: {success}")
+            # Elasticsearch 서버 연결 확인
+            try:
+                es_manager = ElasticsearchManager()
+                is_connected, connection_msg = es_manager.check_connection()
+                if not is_connected:
+                    issues.append(f"Elasticsearch 서버 연결 실패: {connection_msg}")
+            except Exception as e:
+                issues.append(f"Elasticsearch 연결 오류: {str(e)}")
             
-            self.model_choice = model_choice
-            self.top_k = top_k
-            self.is_initialized = True
-            self.initialization_time = time.time() - start_time
+            # Ollama 서버 연결 확인
+            try:
+                from core.rag import check_ollama_connection
+                ollama_connected, ollama_message = check_ollama_connection()
+                if not ollama_connected:
+                    issues.append(f"Ollama 서버 연결 실패: {ollama_message}")
+            except Exception as e:
+                issues.append(f"Ollama 연결 확인 오류: {str(e)}")
             
             return {
-                "status": "success",
-                "message": "RAG 시스템 초기화 완료",
-                "model": LLM_MODELS[model_choice]['name'],
-                "top_k": top_k,
-                "initialization_time": self.initialization_time
+                "status": "ok" if not issues else "error",
+                "issues": issues,
+                "issue_count": len(issues)
             }
-            
-        except Exception as e:
-            self.is_initialized = False
-            return {
-                "status": "error",
-                "message": f"RAG 시스템 초기화 실패: {str(e)}"
-            }
+        
+        return await asyncio.get_event_loop().run_in_executor(None, _check_dependencies)
     
-    async def process_query(self, query: str, session_id: str = "default") -> Dict[str, Any]:
-        """질의 처리 (비동기)"""
-        if not self.is_initialized or not self.rag_chain:
-            raise HTTPException(status_code=400, detail="RAG 시스템이 초기화되지 않았습니다.")
-        
-        start_time = time.time()
-        
-        try:
-            # 대화 기록 컨텍스트 구성
-            chat_manager = self.get_chat_manager(session_id)
-            context_query = chat_manager.build_context_query(query)
-            
-            # RAG 체인 실행
-            response = self.rag_chain({"query": context_query})
-            
-            # 응답 처리
-            answer = self._extract_answer(response)
-            processing_time = time.time() - start_time
-            
-            if answer:
-                # 대화 기록에 추가
-                chat_manager.add_chat(query, answer)
+    async def initialize_rag_system_async(self, model_choice: str, top_k: int = 5) -> Dict[str, Any]:
+        """RAG 시스템 초기화 (비동기 버전)"""
+        def _initialize_rag_system():
+            try:
+                start_time = time.time()
                 
-                return {
-                    "status": "success",
-                    "query": query,
-                    "answer": answer,
-                    "processing_time": processing_time,
-                    "session_id": session_id,
-                    "chat_history_count": chat_manager.get_history_count(),
-                    "timestamp": datetime.now().isoformat()
-                }
-            else:
+                self.model_choice = model_choice
+                self.top_k = top_k
+                
+                # Elasticsearch 관리자 초기화
+                self.es_manager = ElasticsearchManager()
+                
+                # RAG 체인 생성
+                self.rag_chain = create_rag_chain(
+                    es_manager=self.es_manager,
+                    model_factory=self.model_factory,
+                    model_choice=model_choice,
+                    top_k=top_k
+                )
+                
+                if self.rag_chain:
+                    self.is_initialized = True
+                    self.initialization_time = time.time() - start_time
+                    return {
+                        "status": "success",
+                        "message": "RAG 시스템 초기화 완료",
+                        "model": LLM_MODELS[model_choice]['name'],
+                        "top_k": top_k,
+                        "initialization_time": self.initialization_time
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "message": "RAG 시스템 초기화 실패"
+                    }
+                    
+            except Exception as e:
+                self.is_initialized = False
                 return {
                     "status": "error",
-                    "message": "답변을 생성할 수 없습니다.",
-                    "processing_time": processing_time
+                    "message": f"RAG 시스템 초기화 실패: {str(e)}"
                 }
-                
-        except Exception as e:
+        
+        return await asyncio.get_event_loop().run_in_executor(None, _initialize_rag_system)
+    
+    async def process_query_async(self, query: str, session_id: str = "default") -> Dict[str, Any]:
+        """질의 처리 (비동기 버전)"""
+        if not self.is_initialized or not self.rag_chain:
             return {
                 "status": "error",
-                "message": f"질의 처리 오류: {str(e)}",
-                "processing_time": time.time() - start_time
+                "message": "RAG 시스템이 초기화되지 않았습니다."
             }
-    
-    def _extract_answer(self, response) -> Optional[str]:
-        """응답에서 답변 추출"""
-        if isinstance(response, dict):
-            if 'result' in response:
-                return response['result']
-            elif 'answer' in response:
-                return response['answer']
-            else:
-                return str(response)
-        elif hasattr(response, 'content'):
-            return response.content
-        elif isinstance(response, str):
-            return response
-        else:
-            return str(response)
+        
+        def _process_query():
+            try:
+                start_time = time.time()
+                
+                # 대화 기록 관리자 가져오기
+                chat_manager = self.get_chat_manager(session_id)
+                
+                # 대화 기록에 사용자 질문 추가
+                chat_manager.add_user_message(query)
+                
+                # RAG 체인을 통한 답변 생성
+                result = self.rag_chain.invoke({"question": query})
+                
+                processing_time = time.time() - start_time
+                
+                if result and 'answer' in result:
+                    answer = result['answer']
+                    
+                    # 대화 기록에 AI 답변 추가
+                    chat_manager.add_ai_message(answer)
+                    
+                    return {
+                        "status": "success",
+                        "answer": answer,
+                        "query": query,
+                        "session_id": session_id,
+                        "processing_time": processing_time,
+                        "retrieved_docs": result.get('source_documents', [])
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "message": "답변을 생성할 수 없습니다.",
+                        "processing_time": processing_time
+                    }
+                    
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "message": f"질의 처리 오류: {str(e)}",
+                    "processing_time": time.time() - start_time
+                }
+        
+        return await asyncio.get_event_loop().run_in_executor(None, _process_query)
     
     def get_system_info(self) -> Dict[str, Any]:
         """시스템 정보 반환"""
@@ -219,7 +220,7 @@ async def lifespan(app: FastAPI):
     """애플리케이션 라이프사이클 관리"""
     # 시작 시
     global rag_system
-    rag_system = RAGSystemManager()
+    rag_system = FastAPIRAGSystem()
     print("🚀 FastAPI RAG 시스템 시작")
     
     yield
@@ -282,7 +283,7 @@ async def health_check():
 @app.get("/dependencies")
 async def check_dependencies():
     """의존성 확인"""
-    result = await rag_system.check_dependencies()
+    result = await rag_system.check_dependencies_async()
     if result["status"] == "error":
         raise HTTPException(status_code=503, detail=result)
     return result
@@ -306,7 +307,7 @@ async def initialize_system(request: InitRequest):
             detail=f"모델 '{request.model}'를 찾을 수 없습니다. 사용 가능한 모델: {list(available_models.keys())}"
         )
     
-    result = await rag_system.initialize_rag_system(request.model, request.top_k)
+    result = await rag_system.initialize_rag_system_async(request.model, request.top_k)
     
     if result["status"] == "error":
         raise HTTPException(status_code=500, detail=result["message"])
@@ -321,7 +322,7 @@ async def get_system_status():
 @app.post("/query")
 async def process_query(request: QueryRequest):
     """질의 처리"""
-    result = await rag_system.process_query(request.query, request.session_id)
+    result = await rag_system.process_query_async(request.query, request.session_id)
     
     if result["status"] == "error":
         raise HTTPException(status_code=500, detail=result["message"])

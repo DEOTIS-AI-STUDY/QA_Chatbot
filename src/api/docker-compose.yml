@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # Elasticsearch (기존 설정 재사용)
   elasticsearch:
@@ -25,20 +23,20 @@ services:
   # FastAPI RAG 서버
   rag-api:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../../ # 프로젝트 루트에서 빌드
+      dockerfile: src/api/Dockerfile
     container_name: rag_api_server
     ports:
       - "8000:8000"
+    env_file:
+      - ../../.env.prod # 프로젝트 루트의 .env.prod 파일 사용
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app/src:/app
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
     volumes:
-      - ../core:/app/core:ro
-      - ../utils:/app/utils:ro
       - ../../pdf:/app/pdf:ro
       - ../../data:/app/data:ro
       - ../../config:/app/config:ro

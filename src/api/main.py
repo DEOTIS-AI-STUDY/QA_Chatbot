@@ -31,7 +31,14 @@ from core.models import ModelFactory
 from core.rag import create_rag_chain
 from core.chat_history import ChatHistoryManager
 from utils.elasticsearch import ElasticsearchManager
-from langfuse_config import get_langfuse_manager, get_langfuse_callback
+
+# langfuse_config import - 로컬 실행과 Docker 모듈 실행 모두 지원
+try:
+    # Docker에서 모듈로 실행할 때
+    from .langfuse_config import get_langfuse_manager, get_langfuse_callback
+except ImportError:
+    # 로컬에서 직접 실행할 때
+    from langfuse_config import get_langfuse_manager, get_langfuse_callback
 
 # Elasticsearch 가용성 확인
 try:

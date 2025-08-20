@@ -35,6 +35,11 @@ LLM_MODELS = {
         "model_id": "solar:10.7b",
         "api_key_env": None
     },
+    "solar_pro_preview": {
+        "name": "Upstage SOLAR-Pro Preview Instruct",
+        "model_id": "upstage/solar-pro-preview-instruct",
+        "api_key_env": None
+    },
     "qwen2": {
         "name": "Qwen2",
         "model_id": "qwen2:7b",
@@ -88,3 +93,21 @@ except ImportError as e:
     print(f"Ollama 라이브러리 로딩 실패: {e}")
     ChatOllama = None
     OLLAMA_AVAILABLE = False
+
+# Hugging Face Transformers 라이브러리
+try:
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from langchain_huggingface import HuggingFacePipeline
+    TRANSFORMERS_AVAILABLE = True
+except ImportError as e:
+    print(f"Transformers 라이브러리 로딩 실패: {e}")
+    try:
+        from langchain_community.llms import HuggingFacePipeline
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        TRANSFORMERS_AVAILABLE = True
+    except ImportError as e2:
+        print(f"Community Transformers 라이브러리도 로딩 실패: {e2}")
+        HuggingFacePipeline = None
+        AutoTokenizer = None
+        AutoModelForCausalLM = None
+        TRANSFORMERS_AVAILABLE = False

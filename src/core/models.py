@@ -77,9 +77,12 @@ class ModelFactory:
                 return None, "❌ Ollama 라이브러리가 설치되지 않았습니다. pip install langchain-ollama"
             
             try:
+                # 환경 변수에서 Ollama URL 가져오기
+                ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
                 model = ChatOllama(
                     model=LLM_MODELS["solar_10_7b"]["model_id"],
-                    temperature=0
+                    temperature=0,
+                    base_url=ollama_base_url
                 )
                 return model, "✅ SOLAR-10.7B 오픈소스 모델 생성 성공"
             except Exception as e:
@@ -90,9 +93,12 @@ class ModelFactory:
                 return None, "❌ Ollama 라이브러리가 설치되지 않았습니다."
             
             try:
+                # 환경 변수에서 Ollama URL 가져오기
+                ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
                 model = ChatOllama(
                     model=LLM_MODELS["qwen2"]["model_id"],
-                    temperature=0
+                    temperature=0,
+                    base_url=ollama_base_url
                 )
                 return model, "✅ Qwen2 모델 생성 성공"
             except Exception as e:
@@ -157,9 +163,12 @@ class ModelFactory:
                 return None, "❌ Ollama 라이브러리가 설치되지 않았습니다."
             
             try:
+                # 환경 변수에서 Ollama URL 가져오기
+                ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
                 model = ChatOllama(
                     model=LLM_MODELS["llama3"]["model_id"],
-                    temperature=0
+                    temperature=0,
+                    base_url=ollama_base_url
                 )
                 return model, "✅ Llama3 모델 생성 성공"
             except Exception as e:

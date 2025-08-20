@@ -20,6 +20,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
+# 환경 변수 로드
+try:
+    from dotenv import load_dotenv
+    # 프로젝트 루트에서 .env.prod 파일 로드
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env.prod')
+    load_dotenv(env_path)
+    print(f"🔧 환경 변수 로드: {env_path}")
+    print(f"🔗 OLLAMA_BASE_URL: {os.getenv('OLLAMA_BASE_URL', 'Not set')}")
+except ImportError:
+    print("⚠️ python-dotenv가 설치되지 않았습니다. 환경 변수를 수동으로 설정해주세요.")
+
 # 프로젝트 경로 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)

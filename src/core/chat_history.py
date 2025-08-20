@@ -58,6 +58,26 @@ class ChatHistoryManager:
         
         return "\n".join(context_parts)
     
+    def build_history(self) -> str:
+        """대화 기록을 포함한 컨텍스트 질의 구성"""
+        if not self.chat_history:
+            return ""
+        
+        # 최근 N개의 대화만 컨텍스트로 사용
+        recent_history = self.chat_history[-self.context_window:]
+        
+        history_parts = []
+      
+        for i, chat in enumerate(recent_history, 1):
+            history_parts.append(f"사용자: {chat['query']}")
+            # 답변은 200자로 제한하여 토큰 사용량 최적화
+            answer_preview = chat['answer'][:200]
+            if len(chat['answer']) > 200:
+                answer_preview += "..."
+            history_parts.append(f"봇: {answer_preview}\n\n")
+   
+        return "\n".join(history_parts)
+    
     def get_history(self) -> List[Dict[str, Any]]:
         """대화 기록 반환"""
         return self.chat_history.copy()

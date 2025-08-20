@@ -2,7 +2,7 @@
 RAG 시스템 핵심 로직
 """
 from typing import Tuple, Union
-from langchain.chains import RetrievalQA
+from langchain.chains import RetrievalQA, LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import ElasticsearchStore
 from core.config import ELASTICSEARCH_URL, INDEX_NAME
@@ -243,3 +243,120 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3) -> Tuple[Union[Retri
         import traceback
         error_traceback = traceback.format_exc()
         return None, f"예상치 못한 오류:\n예외 타입: {type(e).__name__}\n오류 메시지: {str(e)}\n상세 스택 트레이스:\n{error_traceback}"
+
+# 전역 프롬프트 템플릿 변수 (내용은 직접 작성)
+prompt_for_refined_query = """
+당신은 대화 기록을 기반으로 사용자의 질문을 재정의하는 전문 AI 비서입니다.
+
+- **목표**: 제공된 대화 기록을 활용하여 사용자의 질문을 명확하게 다듬으세요.
+- **규칙 1**: 질문이 맥락과 관련 있다면, 이전 대화 없이도 독립적으로 이해될 수 있도록 질문을 재정의하세요.
+- **규칙 2**: 질문이 대화 맥락과 전혀 관련 없다면, 원래 질문을 그대로 반환하세요.
+- **규칙 3**: 원래 질문의 어조와 의도를 유지하세요. 평서문을 의문문으로 바꾸거나 그 반대로 바꾸지 마세요.
+- **규칙 4**: 재정의된 질문 텍스트만 출력하세요. 불필요한 단어, 문구, 대화형 표현을 일절 추가하지 마세요.
+- **규칙 5**: 원래 질문이나 대화 기록에 없는 새로운 정보나 의도를 추측하여 추가하지 마세요.
+- **규칙 6**: 답변은 반드시 한글로 합니다.
+
+대화 기록: {context}
+
+질문: {question}
+
+답변:
+"""
+
+prompt_for_query = """
+다음 '문서 내용'을 바탕으로 질문에 답변해주세요.
+답변은 한국어(한글)로 작성해주세요.
+절대로 영어로 답변하지 마세요.
+답변에 적절한 줄바꿈을 적용해주세요.
+답변을 표로작성가능하면 표로 작성해주세요.
+표로 작성 불가능한 경우에는 작성할 필요가 없습니다.
+문서에서 답을 찾을 수 없다면 "문서에 관련 내용이 없습니다"라고만 답변하세요.
+
+
+문서 내용: {context}
+
+질문: {question}
+
+답변:
+"""
+prompt_for_context_summary = """
+다음 '내용'을 200자 이내로 요약하여 답변하세요.
+답변은 한국어(한글)로 작성해주세요.
+절대로 영어로 답변하지 마세요.
+
+
+내용: {context}
+
+답변:
+"""
+
+def create_llm_chain(llm_model, prompt_template, input_variables=None):
+    """
+    LLMChain 생성 함수 (예외처리 포함)
+    :param llm_model: 사용할 LLM 모델
+    :param prompt_template: 프롬프트 템플릿
+    :param input_variables: 프롬프트에 사용할 변수 리스트 (예: ["context", "question", "history"])
+    :return: LLMChain 객체 또는 None
+    """
+    try:
+        if input_variables is None:
+            input_variables = ["context", "question"]
+        try:
+            prompt = PromptTemplate(
+                template=prompt_template,
+                input_variables=input_variables
+            )
+        except Exception as e:
+            print(f"❌ PromptTemplate 생성 오류: {str(e)}")
+            return None
+        try:
+            chain = LLMChain(
+                llm=llm_model,
+                prompt=prompt
+            )
+        except Exception as e:
+            print(f"❌ LLMChain 생성 오류: {str(e)}")
+            return None
+        return chain
+    except Exception as e:
+        print(f"❌ create_llm_chain 전체 오류: {str(e)}")
+        return None
+
+def create_retriever(embedding_model, top_k=3):
+    """
+    Elasticsearch 기반 Retriever 생성 함수
+    :param embedding_model: 임베딩 모델 객체
+    :param top_k: 검색할 문서 개수
+    :return: Retriever 객체 또는 None
+    """
+    try:
+        from core.config import ELASTICSEARCH_URL, INDEX_NAME
+        from langchain_community.vectorstores import ElasticsearchStore
+        from utils.elasticsearch import ElasticsearchManager
+        es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
+        if not success:
+            print(f"❌ Elasticsearch 연결 실패: {message}")
+            return None
+        if not es_client.indices.exists(index=INDEX_NAME):
+            print(f"❌ 인덱스 '{INDEX_NAME}'가 존재하지 않습니다. PDF 파일을 먼저 인덱싱하세요.")
+            return None
+        doc_count = es_client.count(index=INDEX_NAME).get("count", 0)
+        if doc_count == 0:
+            print(f"❌ 인덱스 '{INDEX_NAME}'에 문서가 없습니다. PDF 파일을 먼저 인덱싱하세요.")
+            return None
+        vectorstore = ElasticsearchStore(
+            embedding=embedding_model,
+            index_name=INDEX_NAME,
+            es_url=ELASTICSEARCH_URL,
+        )
+        retriever = vectorstore.as_retriever(
+            search_kwargs={
+                "k": top_k,
+                "fetch_k": min(top_k * 3, 10000)
+            }
+        )
+        print("✅ Retriever 생성 성공")
+        return retriever
+    except Exception as e:
+        print(f"❌ Retriever 생성 오류: {str(e)}")
+        return None

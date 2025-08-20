@@ -1,6 +1,7 @@
 """
 RAG 시스템 핵심 로직
 """
+import os
 from typing import Tuple, Union
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
@@ -14,30 +15,46 @@ def check_ollama_connection() -> Tuple[bool, str]:
     try:
         import requests
         import socket
+        from urllib.parse import urlparse
         
-        # 1. 포트 확인
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)
-        result = sock.connect_ex(('localhost', 11434))
-        sock.close()
+        # 환경 변수에서 Ollama URL 가져오기
+        ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+        parsed_url = urlparse(ollama_url)
+        host = parsed_url.hostname or 'localhost'
+        port = parsed_url.port or 11434
         
-        if result != 0:
-            return False, "Ollama 서버가 실행되지 않고 있습니다 (포트 11434 닫힘)"
+        # 1. HTTP 응답 확인 (더 신뢰할 수 있는 방법)
+        try:
+            response = requests.get(f"{ollama_url}/api/version", timeout=5)
+            if response.status_code == 200:
+                version_info = response.json()
+                return True, f"Ollama 서버 연결 성공 (버전: {version_info.get('version', 'unknown')})"
+            else:
+                return False, f"Ollama 서버 응답 오류 (상태 코드: {response.status_code})"
+        except requests.exceptions.ConnectionError:
+            # HTTP 요청이 실패하면 소켓으로 포트 확인
+            pass
+        except requests.exceptions.Timeout:
+            return False, "Ollama 서버 응답 타임아웃"
         
-        # 2. HTTP 응답 확인
-        response = requests.get("http://localhost:11434/api/version", timeout=5)
-        if response.status_code == 200:
-            version_info = response.json()
-            return True, f"Ollama 서버 연결 성공 (버전: {version_info.get('version', 'unknown')})"
-        else:
-            return False, f"Ollama 서버 응답 오류 (상태 코드: {response.status_code})"
+        # 2. 소켓 연결 확인 (HTTP 실패 시에만)
+        # 여러 소켓 패밀리 시도 (IPv4, IPv6)
+        for family in [socket.AF_INET, socket.AF_INET6]:
+            try:
+                sock = socket.socket(family, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                
+                if result == 0:
+                    return False, f"Ollama 서버 포트는 열려있지만 HTTP 응답이 없습니다"
+            except Exception:
+                continue
+        
+        return False, f"Ollama 서버가 실행되지 않고 있습니다 (포트 {port} 닫힘)"
             
     except ImportError:
         return False, "requests 라이브러리가 설치되지 않았습니다"
-    except requests.exceptions.ConnectionError:
-        return False, "Ollama 서버에 연결할 수 없습니다"
-    except requests.exceptions.Timeout:
-        return False, "Ollama 서버 응답 타임아웃"
     except Exception as e:
         return False, f"Ollama 연결 확인 중 오류: {str(e)}"
 

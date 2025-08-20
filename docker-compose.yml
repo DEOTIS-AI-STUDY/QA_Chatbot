@@ -24,7 +24,7 @@ services:
   rag-api:
     build:
       context: . # 프로젝트 루트에서 빌드
-      dockerfile: src/api/Dockerfile
+      dockerfile: Dockerfile
     container_name: rag_api_server
     ports:
       - "8000:8000"

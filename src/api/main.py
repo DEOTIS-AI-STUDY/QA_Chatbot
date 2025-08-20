@@ -216,7 +216,7 @@ class FastAPIRAGSystem:
                     # Langfuse에 결과 로그
                     if trace:
                         self.langfuse_manager.log_generation(
-                            trace_id=trace.id,
+                            trace_context=trace.get('trace_context'),
                             name="rag_generation",
                             input=query,
                             output=answer,
@@ -239,7 +239,7 @@ class FastAPIRAGSystem:
                     # Langfuse에 에러 로그
                     if trace:
                         self.langfuse_manager.log_event(
-                            trace_id=trace.id,
+                            trace_context=trace.get('trace_context'),
                             name="rag_error",
                             metadata={
                                 "error": f"답변 생성 실패. 응답 구조: {result}",
@@ -257,7 +257,7 @@ class FastAPIRAGSystem:
                 # Langfuse에 예외 로그
                 if 'trace' in locals() and trace:
                     self.langfuse_manager.log_event(
-                        trace_id=trace.id,
+                        trace_context=trace.get('trace_context'),
                         name="rag_exception",
                         metadata={
                             "error": str(e),
@@ -332,6 +332,16 @@ class ChatHistoryResponse(BaseModel):
     history: List[Dict[str, Any]]
     count: int
     session_id: str
+
+class LangfuseTraceResponse(BaseModel):
+    data: List[Dict[str, Any]]
+    meta: Optional[Dict[str, Any]] = None
+
+class LangfuseUsageResponse(BaseModel):
+    total_tokens: int
+    total_cost: float
+    model_usage: Dict[str, Dict[str, Any]]
+    observation_count: int
 
 
 # API 엔드포인트
@@ -445,13 +455,13 @@ async def delete_session(session_id: str):
         raise HTTPException(status_code=404, detail=f"세션 '{session_id}'를 찾을 수 없습니다.")
 
 
-@app.get("/langfuse/status")
+@app.get("/langfuse/status", tags=["Langfuse"])
 async def get_langfuse_status():
     """Langfuse 상태 확인"""
     return rag_system.langfuse_manager.get_status()
 
 
-@app.post("/langfuse/flush")
+@app.post("/langfuse/flush", tags=["Langfuse"])
 async def flush_langfuse():
     """Langfuse 로그 강제 전송"""
     try:
@@ -462,6 +472,140 @@ async def flush_langfuse():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Langfuse flush 실패: {str(e)}")
+
+
+@app.get("/langfuse/traces", tags=["Langfuse"], response_model=Dict[str, Any])
+async def get_langfuse_traces(
+    limit: int = 50,
+    page: int = 1,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None
+):
+    """Langfuse 트레이스 목록 조회
+    
+    - **limit**: 페이지당 결과 수 (기본값: 50)
+    - **page**: 페이지 번호 (기본값: 1)
+    - **session_id**: 세션 ID 필터
+    - **user_id**: 사용자 ID 필터
+    """
+    try:
+        filters = {}
+        if session_id:
+            filters['session_id'] = session_id
+        if user_id:
+            filters['user_id'] = user_id
+            
+        result = rag_system.langfuse_manager.get_traces(
+            limit=limit,
+            page=page,
+            **filters
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"트레이스 조회 실패: {str(e)}")
+
+
+@app.get("/langfuse/traces/{trace_id}", tags=["Langfuse"])
+async def get_langfuse_trace(trace_id: str):
+    """특정 트레이스 상세 조회
+    
+    - **trace_id**: 조회할 트레이스 ID
+    """
+    try:
+        result = rag_system.langfuse_manager.get_trace_by_id(trace_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"트레이스 조회 실패: {str(e)}")
+
+
+@app.get("/langfuse/observations", tags=["Langfuse"])
+async def get_langfuse_observations(
+    limit: int = 50,
+    page: int = 1,
+    trace_id: Optional[str] = None,
+    type: Optional[str] = None
+):
+    """Langfuse 관찰 데이터 조회 (LLM 호출, 스팬 등)
+    
+    - **limit**: 페이지당 결과 수 (기본값: 50)
+    - **page**: 페이지 번호 (기본값: 1)
+    - **trace_id**: 트레이스 ID 필터
+    - **type**: 관찰 타입 필터 (GENERATION, SPAN, EVENT 등)
+    """
+    try:
+        filters = {}
+        if trace_id:
+            filters['trace_id'] = trace_id
+        if type:
+            filters['type'] = type
+            
+        result = rag_system.langfuse_manager.get_observations(
+            limit=limit,
+            page=page,
+            **filters
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"관찰 데이터 조회 실패: {str(e)}")
+
+
+@app.get("/langfuse/sessions", tags=["Langfuse"])
+async def get_langfuse_sessions(
+    limit: int = 50,
+    page: int = 1
+):
+    """Langfuse 세션 목록 조회
+    
+    - **limit**: 페이지당 결과 수 (기본값: 50)
+    - **page**: 페이지 번호 (기본값: 1)
+    """
+    try:
+        result = rag_system.langfuse_manager.get_sessions(
+            limit=limit,
+            page=page
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"세션 조회 실패: {str(e)}")
+
+
+@app.get("/langfuse/usage", tags=["Langfuse"], response_model=LangfuseUsageResponse)
+async def get_langfuse_usage(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None
+):
+    """LLM 사용 통계 조회
+    
+    - **from_date**: 시작 날짜 (ISO 형식, 예: 2023-01-01T00:00:00Z)
+    - **to_date**: 종료 날짜 (ISO 형식, 예: 2023-12-31T23:59:59Z)
+    
+    반환 데이터:
+    - total_tokens: 총 토큰 사용량
+    - total_cost: 총 비용
+    - model_usage: 모델별 사용 통계
+    - observation_count: 총 관찰 데이터 수
+    """
+    try:
+        result = rag_system.langfuse_manager.get_usage_statistics(
+            from_date=from_date,
+            to_date=to_date
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"사용 통계 조회 실패: {str(e)}")
+
+
+@app.get("/langfuse/metrics", tags=["Langfuse"])
+async def get_langfuse_metrics():
+    """Langfuse 메트릭 조회
+    
+    시스템 전체 메트릭 및 성능 지표를 조회합니다.
+    """
+    try:
+        result = rag_system.langfuse_manager.get_metrics()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"메트릭 조회 실패: {str(e)}")
 
 
 # 에러 핸들러

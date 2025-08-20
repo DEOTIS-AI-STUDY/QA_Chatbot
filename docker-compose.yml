@@ -21,40 +21,40 @@ services:
       timeout: 10s
       retries: 5
 
-  # FastAPI RAG 서버
-  rag-api:
-    build:
-      context: . # 프로젝트 루트에서 빌드
-      dockerfile: Dockerfile
-    container_name: rag_api_server
-    ports:
-      - "8000:8000"
-    env_file:
-      - ./.env.prod # 프로젝트 루트의 .env.prod 파일 사용
-    environment:
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434 # 호스트의 Ollama 사용
-      - PYTHONPATH=/app/src:/app
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
-    volumes:
-      - ./pdf:/app/pdf:ro
-      - ./data:/app/data:ro
-      - ./config:/app/config:ro
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    networks:
-      - rag_network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    extra_hosts:
-      - "host.docker.internal:host-gateway" # 호스트 접근 허용
+  # # FastAPI RAG 서버
+  # rag-api:
+  #   build:
+  #     context: . # 프로젝트 루트에서 빌드
+  #     dockerfile: Dockerfile
+  #   container_name: rag_api_server
+  #   ports:
+  #     - "8000:8000"
+  #   env_file:
+  #     - ./.env.prod # 프로젝트 루트의 .env.prod 파일 사용
+  #   environment:
+  #     - ELASTICSEARCH_URL=http://elasticsearch:9200
+  #     - OLLAMA_BASE_URL=http://host.docker.internal:11434 # 호스트의 Ollama 사용
+  #     - PYTHONPATH=/app/src:/app
+  #     - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+  #     - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+  #     - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+  #   volumes:
+  #     - ./pdf:/app/pdf:ro
+  #     - ./data:/app/data:ro
+  #     - ./config:/app/config:ro
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+  #   networks:
+  #     - rag_network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway" # 호스트 접근 허용
 
   # Ollama (AWS EC2에 이미 설치되어 있으므로 주석 처리)
   # ollama:

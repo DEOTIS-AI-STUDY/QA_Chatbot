@@ -39,7 +39,7 @@ sys.path.append(parent_dir)
 # unified_rag_cli.py와 동일한 모듈 import 방식
 from core.config import LLM_MODELS, HUGGINGFACE_EMBEDDINGS_AVAILABLE, UPSTAGE_AVAILABLE, OLLAMA_AVAILABLE
 from core.models import ModelFactory
-from core.rag import create_rag_chain
+from core.rag import create_llm_chain, create_rag_chain, create_retriever, prompt_for_refined_query, prompt_for_query, prompt_for_context_summary
 from core.chat_history import ChatHistoryManager
 from utils.elasticsearch import ElasticsearchManager
 
@@ -74,6 +74,8 @@ class FastAPIRAGSystem:
         self.llm_model = None
         self.model_choice = None
         self.top_k = 5
+        self.retriever = None
+        self.llm_chain = None
         
         # Langfuse 매니저 초기화
         self.langfuse_manager = get_langfuse_manager()
@@ -164,7 +166,24 @@ class FastAPIRAGSystem:
                     top_k=top_k,
                     callbacks=callbacks
                 )
-                
+
+                # Retriever 생성
+                self.retriever = create_retriever(
+                    embedding_model=self.embedding_model,
+                    top_k=top_k
+                )
+
+
+                # LLM 체인 생성
+                try:
+                    self.llm_chain = create_llm_chain(
+                        llm_model=self.llm_model,
+                        prompt_template="""{context}, {question}"""
+                    )
+                except Exception as e:
+                    print(f"❌ LLM 체인 생성 오류: {str(e)}")
+                    self.llm_chain = None
+
                 if self.rag_chain:
                     self.is_initialized = True
                     self.initialization_time = time.time() - start_time
@@ -180,6 +199,7 @@ class FastAPIRAGSystem:
                         "status": "error",
                         "message": f"RAG 체인 생성 실패: {success_or_error}"
                     }
+                    
                     
             except Exception as e:
                 self.is_initialized = False
@@ -215,8 +235,23 @@ class FastAPIRAGSystem:
                 # 대화 기록 관리자 가져오기
                 chat_manager = self.get_chat_manager(session_id)
                 
+                # 대화 기록으로 질문 재정의.
+                history = chat_manager.build_history()
+                print(f"🔍 대화 기록: {history}")
+                print(f"🔍 질의: {query}")
+                refined_query = create_llm_chain(self.llm_model, prompt_for_refined_query).run({"question": query, "context": history})
+                print(f"🔍 정제된 질의: {refined_query}")
+
+                # 재정의된 질문으로 DB 검색
+                docs = self.retriever.get_relevant_documents(refined_query)
+                docs_text = "\n".join([getattr(doc, "page_content", str(doc)) for doc in docs])
+                print(f"🔍 검색된 문서 내용: {docs_text}")
+
+                # 검색된 자료와 재정의 질문을 LLM에 넘겨서 답변 생성
+                result = create_llm_chain(self.llm_model, prompt_for_query).invoke({"question": refined_query, "context": docs_text})
+
                 # RAG 체인을 통한 답변 생성
-                result = self.rag_chain.invoke({"query": query})
+                #result = self.rag_chain.invoke({"query": query})
                 
                 # 디버깅: 실제 응답 구조 출력
                 print(f"🔍 RAG 체인 응답 구조: {result}")
@@ -225,11 +260,14 @@ class FastAPIRAGSystem:
                 processing_time = time.time() - start_time
                 
                 # RetrievalQA는 'result' 키를 사용함
-                if result and ('answer' in result or 'result' in result):
-                    answer = result.get('answer') or result.get('result')
-                    
+                if result and ('answer' in result or 'result' in result or 'text' in result):
+                    answer = result.get('answer') or result.get('result') or result.get('text')
+                    print(f"🔍 최종 답변: {answer}")
+                    # 답변 요약
+                    answer_summary = create_llm_chain(self.llm_model, prompt_for_context_summary).run({"context": answer})
+                    print(f"🔍 답변 요약: {answer_summary}")
                     # 대화 기록에 질문과 답변 추가
-                    chat_manager.add_chat(query, answer)
+                    chat_manager.add_chat(refined_query, answer_summary)
                     
                     # Langfuse에 결과 로그
                     if trace:

@@ -36,9 +36,9 @@ python main.py
 
 서버 실행 후 다음 URL에서 API 문서를 확인할 수 있습니다:
 
-- **Swagger UI**: http://127.0.0.1:8000/docs
-- **ReDoc**: http://127.0.0.1:8000/redoc
-- **OpenAPI JSON**: http://127.0.0.1:8000/openapi.json
+- **Swagger UI**: http://127.0.0.1:8110/docs
+- **ReDoc**: http://127.0.0.1:8110/redoc
+- **OpenAPI JSON**: http://127.0.0.1:8110/openapi.json
 
 ### 4. 웹 인터페이스 사용
 
@@ -107,18 +107,18 @@ asyncio.run(main())
 
 ```bash
 # 헬스체크
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8110/health
 
 # 모델 목록
-curl http://127.0.0.1:8000/models
+curl http://127.0.0.1:8110/models
 
 # 시스템 초기화
-curl -X POST http://127.0.0.1:8000/initialize \
+curl -X POST http://127.0.0.1:8110/initialize \
   -H "Content-Type: application/json" \
   -d '{"model": "upstage", "top_k": 5}'
 
 # 질의 처리
-curl -X POST http://127.0.0.1:8000/query \
+curl -X POST http://127.0.0.1:8110/query \
   -H "Content-Type: application/json" \
   -d '{"query": "BC카드의 주요 서비스는?", "session_id": "test"}'
 ```
@@ -127,14 +127,14 @@ curl -X POST http://127.0.0.1:8000/query \
 
 ```javascript
 // 시스템 초기화
-const initResponse = await fetch("http://127.0.0.1:8000/initialize", {
+const initResponse = await fetch("http://127.0.0.1:8110/initialize", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ model: "upstage", top_k: 5 }),
 });
 
 // 질의 처리
-const queryResponse = await fetch("http://127.0.0.1:8000/query", {
+const queryResponse = await fetch("http://127.0.0.1:8110/query", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
@@ -156,7 +156,7 @@ console.log(result.answer);
 docker build -t rag-api .
 
 # 컨테이너 실행
-docker run -p 8000:8000 rag-api
+docker run -p 8110:8110 rag-api
 ```
 
 ### Docker Compose
@@ -179,7 +179,7 @@ docker-compose down
 | 변수                | 기본값                  | 설명                  |
 | ------------------- | ----------------------- | --------------------- |
 | `HOST`              | `127.0.0.1`             | 서버 바인딩 주소      |
-| `PORT`              | `8000`                  | 서버 포트             |
+| `PORT`              | `8110`                  | 서버 포트             |
 | `RELOAD`            | `false`                 | 개발 모드 자동 리로드 |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch URL     |
 
@@ -247,7 +247,7 @@ app.add_middleware(
 
 ```bash
 # 개발 모드에서 상세 로그 확인
-uvicorn main:app --host 127.0.0.1 --port 8000 --log-level debug
+uvicorn main:app --host 127.0.0.1 --port 8110 --log-level debug
 ```
 
 ## 🔄 CLI/Streamlit에서 FastAPI로 변경사항

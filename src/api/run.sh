@@ -62,7 +62,7 @@ fi
 
 # 서버 설정
 HOST=${HOST:-127.0.0.1}
-PORT=${PORT:-8000}
+PORT=${PORT:-8110}
 RELOAD=${RELOAD:-false}
 
 # 서버 실행

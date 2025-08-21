@@ -29,7 +29,7 @@ COPY src/utils/ ./src/utils/
 COPY src/api/ ./src/api/
 
 # 포트 노출
-EXPOSE 8000
+EXPOSE 8110
 
 # 환경 변수 설정
 ENV PYTHONPATH=/app/src:/app
@@ -37,7 +37,7 @@ ENV PYTHONUNBUFFERED=1
 
 # 헬스체크
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8110/health || exit 1
 
 # 서버 실행 (main.py는 src/api 디렉토리 안에 있음)
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8110"]

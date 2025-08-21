@@ -31,6 +31,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+class DebugCallbackHandler(CallbackHandler):
+    def on_llm_start(self, *args, **kwargs):
+        print("[Langfuse DEBUG] on_llm_start called")
+        return super().on_llm_start(*args, **kwargs)
+    def on_llm_end(self, *args, **kwargs):
+        print("[Langfuse DEBUG] on_llm_end called")
+        return super().on_llm_end(*args, **kwargs)
 
 class LangfuseManager:
     """Langfuse 관리 클래스"""
@@ -45,41 +52,40 @@ class LangfuseManager:
         """Langfuse 클라이언트 초기화"""
         if not LANGFUSE_AVAILABLE:
             logger.warning("Langfuse가 설치되지 않았습니다.")
+            print("[Langfuse DEBUG] Langfuse가 설치되지 않았습니다.")
             return
-        
         try:
             # 환경변수에서 설정 읽기
             public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
             secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-            host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-            
+            host = os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+            print(f"[Langfuse DEBUG] ENV LANGFUSE_PUBLIC_KEY={public_key}")
+            print(f"[Langfuse DEBUG] ENV LANGFUSE_SECRET_KEY={'SET' if secret_key else 'NOT SET'}")
+            print(f"[Langfuse DEBUG] ENV LANGFUSE_HOST={host}")
             if public_key and secret_key:
                 # 환경변수 설정 (CallbackHandler가 자동으로 읽음)
                 os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
                 os.environ["LANGFUSE_SECRET_KEY"] = secret_key
                 os.environ["LANGFUSE_HOST"] = host
-                
                 self.client = Langfuse(
                     public_key=public_key,
                     secret_key=secret_key,
                     host=host
                 )
-                
                 # CallbackHandler 초기화 (환경변수에서 자동으로 읽음)
-                self.callback_handler = CallbackHandler()
-                
+                self.callback_handler = DebugCallbackHandler()
+                print(f"[Langfuse DEBUG] CallbackHandler 생성: {self.callback_handler}")
                 self.is_enabled = True
                 logger.info(f"✅ Langfuse 초기화 완료: {host}")
-                
                 # 연결 테스트
                 self._test_connection()
-                
             else:
                 logger.info("ℹ️ Langfuse 환경변수가 설정되지 않았습니다. Langfuse 추적이 비활성화됩니다.")
+                print("[Langfuse DEBUG] Langfuse 환경변수 미설정. 콜백 생성 안됨.")
                 self.is_enabled = False
-                
         except Exception as e:
             logger.error(f"❌ Langfuse 초기화 실패: {str(e)}")
+            print(f"[Langfuse DEBUG] Langfuse 초기화 예외: {str(e)}")
             self.is_enabled = False
     
     def _test_connection(self):
@@ -97,6 +103,7 @@ class LangfuseManager:
     
     def get_callback_handler(self):
         """LangChain 콜백 핸들러 반환"""
+        print(f"[Langfuse DEBUG] get_callback_handler called. is_enabled={self.is_enabled}, callback_handler={self.callback_handler}")
         return self.callback_handler if self.is_enabled else None
     
     def create_trace(self, name: str, metadata: Optional[Dict[str, Any]] = None):

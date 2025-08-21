@@ -315,7 +315,7 @@ prompt_for_context_summary = """
 답변:
 """
 
-def create_llm_chain(llm_model, prompt_template, input_variables=None):
+def create_llm_chain(llm_model, prompt_template, input_variables=None, callbacks=None):
     """
     LLMChain 생성 함수 (예외처리 포함)
     :param llm_model: 사용할 LLM 모델
@@ -339,6 +339,8 @@ def create_llm_chain(llm_model, prompt_template, input_variables=None):
                 llm=llm_model,
                 prompt=prompt
             )
+            if callbacks:
+                chain.callbacks = callbacks
         except Exception as e:
             print(f"❌ LLMChain 생성 오류: {str(e)}")
             return None

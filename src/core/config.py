@@ -76,15 +76,6 @@ except ImportError as e:
         HuggingFaceEmbeddings = None
         HUGGINGFACE_EMBEDDINGS_AVAILABLE = False
 
-# Upstage 라이브러리
-try:
-    from langchain_upstage import ChatUpstage
-    UPSTAGE_AVAILABLE = True
-except ImportError as e:
-    print(f"Upstage 라이브러리 로딩 실패: {e}")
-    ChatUpstage = None
-    UPSTAGE_AVAILABLE = False
-
 # Ollama 라이브러리
 try:
     from langchain_ollama import ChatOllama

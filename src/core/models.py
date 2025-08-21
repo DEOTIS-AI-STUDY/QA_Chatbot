@@ -122,7 +122,9 @@ class ModelFactory:
                     model_id,
                     torch_dtype="auto",
                     device_map="auto",
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    offload_folder="offload",
+                    offload_buffers=True
                 )
                 text_pipeline = pipeline(
                     "text-generation",

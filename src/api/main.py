@@ -685,7 +685,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="FastAPI RAG 시스템 서버")
     parser.add_argument("--host", default="127.0.0.1", help="서버 호스트")
-    parser.add_argument("--port", type=int, default=8000, help="서버 포트")
+    parser.add_argument("--port", type=int, default=8110, help="서버 포트")
     parser.add_argument("--reload", action="store_true", help="자동 리로드 활성화")
     parser.add_argument("--init-index", action="store_true", help="PDF 자동 인덱싱만 수행하고 종료")
     args = parser.parse_args()

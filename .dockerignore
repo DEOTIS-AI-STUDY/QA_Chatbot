@@ -1,0 +1,82 @@
+# 불필요한 파일들을 Docker 빌드에서 제외
+
+# Git 관련
+.git/
+.gitignore
+
+# Python 관련
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 가상환경
+.venv/
+venv/
+env/
+ENV/
+
+# 로그 파일
+*.log
+logs/*.log
+
+# 임시 파일
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# 데이터베이스
+db/
+
+# 테스트 관련
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE 관련
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 문서 (긴 파일명 문제)
+docs/
+*.md
+README.md
+INSTALL.md
+
+# 기타 불필요한 파일
+retrieved_docs.log
+.env.example
+.env.prod.example
+
+# 실제 환경 설정 파일은 포함
+!.env.prod
+
+# 스크립트 (컨테이너 내부에서 실행하지 않는 것들)
+check_langsmith.sh
+run.sh
+run_selectableLLM.sh
+
+# 개발용 설정
+docker-compose.yml

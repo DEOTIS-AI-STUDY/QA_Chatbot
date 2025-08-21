@@ -23,6 +23,15 @@ if TRANSFORMERS_AVAILABLE:
 
 
 class ModelFactory:
+    @staticmethod
+    def add_gemma3_model():
+        """LLM_MODELS에 gemma3:12b 모델 추가 (Ollama 기반)"""
+        if "gemma3" not in LLM_MODELS:
+            LLM_MODELS["gemma3"] = {
+                "name": "Gemma3 12B (Ollama)",
+                "model_id": "gemma3:12b",
+                "api_key_env": None
+            }
     """모델 생성 팩토리 클래스"""
     
     @staticmethod
@@ -54,6 +63,20 @@ class ModelFactory:
     @staticmethod
     def create_llm_model(model_choice: str):
         """선택된 LLM 모델 생성 (Upstage API Key 없이 HuggingFace Transformers만 사용)"""
+        # Gemma3:12b (Ollama 기반)
+        if model_choice == "gemma3":
+            if not OLLAMA_AVAILABLE:
+                return None, "❌ Ollama 라이브러리가 설치되지 않았습니다. pip install langchain-ollama"
+            try:
+                ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+                model = ChatOllama(
+                    model=LLM_MODELS["gemma3"]["model_id"],
+                    temperature=0,
+                    base_url=ollama_base_url
+                )
+                return model, "✅ Gemma3 12B (Ollama) 모델 생성 성공"
+            except Exception as e:
+                return None, f"Gemma3 12B (Ollama) 모델 생성 실패: {str(e)}"
         if model_choice == "upstage":
             if not TRANSFORMERS_AVAILABLE:
                 return None, "❌ Transformers 라이브러리가 설치되지 않았습니다. pip install transformers torch"
@@ -163,13 +186,12 @@ class ModelFactory:
     def get_available_models() -> dict:
         """사용 가능한 모델 목록 반환"""
         available_models = {}
-        
         if OLLAMA_AVAILABLE:
             available_models["qwen2"] = LLM_MODELS["qwen2"]
             available_models["llama3"] = LLM_MODELS["llama3"]
             available_models["solar_10_7b"] = LLM_MODELS["solar_10_7b"]
-        
+            if "gemma3" in LLM_MODELS:
+                available_models["gemma3"] = LLM_MODELS["gemma3"]
         if TRANSFORMERS_AVAILABLE:
             available_models["solar_pro_preview"] = LLM_MODELS["solar_pro_preview"]
-            
         return available_models

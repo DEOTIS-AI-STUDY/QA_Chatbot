@@ -53,25 +53,33 @@ class ModelFactory:
     
     @staticmethod
     def create_llm_model(model_choice: str):
-        """선택된 LLM 모델 생성"""
+        """선택된 LLM 모델 생성 (Upstage API Key 없이 HuggingFace Transformers만 사용)"""
         if model_choice == "upstage":
-            if not UPSTAGE_AVAILABLE:
-                return None, "❌ Upstage 라이브러리가 설치되지 않았습니다."
-            
-            api_key = os.getenv("UPSTAGE_API_KEY")
-            if not api_key:
-                return None, "UPSTAGE_API_KEY가 설정되지 않았습니다."
-            
+            if not TRANSFORMERS_AVAILABLE:
+                return None, "❌ Transformers 라이브러리가 설치되지 않았습니다. pip install transformers torch"
             try:
-                model = ChatUpstage(
-                    api_key=api_key,
-                    model=LLM_MODELS["upstage"]["model_id"],
-                    temperature=0
+                model_id = LLM_MODELS["upstage"]["model_id"]
+                tokenizer = AutoTokenizer.from_pretrained(model_id)
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    torch_dtype="auto",
+                    device_map="auto",
+                    trust_remote_code=True
                 )
-                return model, "✅ Upstage Solar Mini 모델 생성 성공"
+                text_pipeline = pipeline(
+                    "text-generation",
+                    model=model,
+                    tokenizer=tokenizer,
+                    max_new_tokens=512,
+                    temperature=0.1,
+                    do_sample=True,
+                    return_full_text=False
+                )
+                llm_model = HuggingFacePipeline(pipeline=text_pipeline)
+                return llm_model, "✅ Upstage Solar Mini (로컬) 모델 생성 성공"
             except Exception as e:
-                return None, f"Upstage 모델 생성 실패: {str(e)}"
-        
+                return None, f"Upstage Solar Mini (로컬) 모델 생성 실패: {str(e)}"
+
         elif model_choice == "solar_10_7b":
             if not OLLAMA_AVAILABLE:
                 return None, "❌ Ollama 라이브러리가 설치되지 않았습니다. pip install langchain-ollama"
@@ -107,56 +115,28 @@ class ModelFactory:
         elif model_choice == "solar_pro_preview":
             if not TRANSFORMERS_AVAILABLE:
                 return None, "❌ Transformers 라이브러리가 설치되지 않았습니다. pip install transformers torch"
-            
-            # Upstage API Key가 있으면 API 사용, 없으면 로컬 모델 사용
-            api_key = os.getenv("UPSTAGE_API_KEY")
-            
-            if api_key:
-                # API 사용 (ChatUpstage 사용)
-                if not UPSTAGE_AVAILABLE:
-                    return None, "❌ Upstage 라이브러리가 설치되지 않았습니다. pip install langchain-upstage"
-                
-                try:
-                    model = ChatUpstage(
-                        api_key=api_key,
-                        model="solar-pro-preview",
-                        temperature=0
-                    )
-                    return model, "✅ SOLAR-Pro Preview (API) 모델 생성 성공"
-                except Exception as e:
-                    return None, f"SOLAR-Pro Preview API 모델 생성 실패: {str(e)}"
-            else:
-                # 로컬 Hugging Face 모델 사용
-                try:
-                    model_id = LLM_MODELS["solar_pro_preview"]["model_id"]
-                    
-                    # 토크나이저와 모델 로드
-                    tokenizer = AutoTokenizer.from_pretrained(model_id)
-                    model = AutoModelForCausalLM.from_pretrained(
-                        model_id,
-                        torch_dtype="auto",
-                        device_map="auto",
-                        trust_remote_code=True
-                    )
-                    
-                    # 파이프라인 생성
-                    text_pipeline = pipeline(
-                        "text-generation",
-                        model=model,
-                        tokenizer=tokenizer,
-                        max_new_tokens=512,
-                        temperature=0.1,
-                        do_sample=True,
-                        return_full_text=False
-                    )
-                    
-                    # LangChain 파이프라인으로 래핑
-                    llm_model = HuggingFacePipeline(pipeline=text_pipeline)
-                    
-                    return llm_model, "✅ SOLAR-Pro Preview (로컬) 모델 생성 성공"
-                    
-                except Exception as e:
-                    return None, f"SOLAR-Pro Preview 로컬 모델 생성 실패: {str(e)}"
+            try:
+                model_id = LLM_MODELS["solar_pro_preview"]["model_id"]
+                tokenizer = AutoTokenizer.from_pretrained(model_id)
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    torch_dtype="auto",
+                    device_map="auto",
+                    trust_remote_code=True
+                )
+                text_pipeline = pipeline(
+                    "text-generation",
+                    model=model,
+                    tokenizer=tokenizer,
+                    max_new_tokens=512,
+                    temperature=0.1,
+                    do_sample=True,
+                    return_full_text=False
+                )
+                llm_model = HuggingFacePipeline(pipeline=text_pipeline)
+                return llm_model, "✅ SOLAR-Pro Preview (로컬) 모델 생성 성공"
+            except Exception as e:
+                return None, f"SOLAR-Pro Preview (로컬) 모델 생성 실패: {str(e)}"
         
         elif model_choice == "llama3":
             if not OLLAMA_AVAILABLE:

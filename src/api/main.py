@@ -37,7 +37,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 # unified_rag_cli.py와 동일한 모듈 import 방식
-from core.config import LLM_MODELS, HUGGINGFACE_EMBEDDINGS_AVAILABLE, UPSTAGE_AVAILABLE, OLLAMA_AVAILABLE
+from core.config import LLM_MODELS, HUGGINGFACE_EMBEDDINGS_AVAILABLE, OLLAMA_AVAILABLE
 from core.models import ModelFactory
 from core.rag import create_llm_chain, create_rag_chain, create_retriever, prompt_for_refined_query, prompt_for_query, prompt_for_context_summary
 from core.chat_history import ChatHistoryManager

@@ -217,11 +217,11 @@ class FastAPIRAGSystem:
                 "status": "error",
                 "message": "RAG 시스템이 초기화되지 않았습니다."
             }
-
+        
         def _process_query():
             try:
                 start_time = time.time()
-
+                
                 # Langfuse 트레이스 생성
                 trace = self.langfuse_manager.create_trace(
                     name="rag_query",
@@ -231,25 +231,15 @@ class FastAPIRAGSystem:
                         "top_k": self.top_k
                     }
                 )
-
-                # Langfuse 콜백 준비
-                langfuse_callback = None
-                try:
-                    from core.rag import get_langfuse_callback
-                    langfuse_callback = get_langfuse_callback()
-                except Exception:
-                    pass
-                callbacks = [langfuse_callback] if langfuse_callback else None
-
+                
                 # 대화 기록 관리자 가져오기
                 chat_manager = self.get_chat_manager(session_id)
-
+                
                 # 대화 기록으로 질문 재정의.
                 history = chat_manager.build_history()
                 print(f"🔍 대화 기록: {history}")
                 print(f"🔍 질의: {query}")
-                llm_chain_refine = create_llm_chain(self.llm_model, prompt_for_refined_query, callbacks=callbacks)
-                refined_query = llm_chain_refine.run({"question": query, "context": history})
+                refined_query = create_llm_chain(self.llm_model, prompt_for_refined_query).run({"question": query, "context": history})
                 print(f"🔍 정제된 질의: {refined_query}")
 
                 # 재정의된 질문으로 DB 검색
@@ -258,29 +248,27 @@ class FastAPIRAGSystem:
                 print(f"🔍 검색된 문서 내용: {docs_text}")
 
                 # 검색된 자료와 재정의 질문을 LLM에 넘겨서 답변 생성
-                llm_chain_query = create_llm_chain(self.llm_model, prompt_for_query, callbacks=callbacks)
-                result = llm_chain_query.invoke({"question": refined_query, "context": docs_text})
+                result = create_llm_chain(self.llm_model, prompt_for_query).invoke({"question": refined_query, "context": docs_text})
 
                 # RAG 체인을 통한 답변 생성
                 #result = self.rag_chain.invoke({"query": query})
-
+                
                 # 디버깅: 실제 응답 구조 출력
                 print(f"🔍 RAG 체인 응답 구조: {result}")
                 print(f"🔍 응답 키들: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-
+                
                 processing_time = time.time() - start_time
-
+                
                 # RetrievalQA는 'result' 키를 사용함
                 if result and ('answer' in result or 'result' in result or 'text' in result):
                     answer = result.get('answer') or result.get('result') or result.get('text')
                     print(f"🔍 최종 답변: {answer}")
                     # 답변 요약
-                    llm_chain_summary = create_llm_chain(self.llm_model, prompt_for_context_summary, callbacks=callbacks)
-                    answer_summary = llm_chain_summary.run({"context": answer})
+                    answer_summary = create_llm_chain(self.llm_model, prompt_for_context_summary).run({"context": answer})
                     print(f"🔍 답변 요약: {answer_summary}")
                     # 대화 기록에 질문과 답변 추가
                     chat_manager.add_chat(refined_query, answer_summary)
-
+                    
                     # Langfuse에 결과 로그
                     if trace:
                         self.langfuse_manager.log_generation(
@@ -294,7 +282,7 @@ class FastAPIRAGSystem:
                                 "model": self.model_choice
                             }
                         )
-
+                    
                     return {
                         "status": "success",
                         "answer": answer,
@@ -314,13 +302,13 @@ class FastAPIRAGSystem:
                                 "processing_time": processing_time
                             }
                         )
-
+                    
                     return {
                         "status": "error",
                         "message": f"답변을 생성할 수 없습니다. 응답 구조: {result}",
                         "processing_time": processing_time
                     }
-
+                    
             except Exception as e:
                 # Langfuse에 예외 로그
                 if 'trace' in locals() and trace:
@@ -332,13 +320,13 @@ class FastAPIRAGSystem:
                             "processing_time": time.time() - start_time
                         }
                     )
-
+                
                 return {
                     "status": "error",
                     "message": f"질의 처리 오류: {str(e)}",
                     "processing_time": time.time() - start_time
                 }
-
+        
         return await asyncio.get_event_loop().run_in_executor(None, _process_query)
     
     def get_system_info(self) -> Dict[str, Any]:

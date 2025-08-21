@@ -5,8 +5,8 @@ import os
 from typing import Optional
 from core.config import (
     BGE_MODEL_NAME, LLM_MODELS,
-    HUGGINGFACE_EMBEDDINGS_AVAILABLE, UPSTAGE_AVAILABLE, OLLAMA_AVAILABLE, TRANSFORMERS_AVAILABLE,
-    HuggingFaceEmbeddings, ChatUpstage, ChatOllama
+    HUGGINGFACE_EMBEDDINGS_AVAILABLE, OLLAMA_AVAILABLE, TRANSFORMERS_AVAILABLE,
+    HuggingFaceEmbeddings, ChatOllama
 )
 
 # TRANSFORMERS_AVAILABLE이 True일 때만 import
@@ -167,7 +167,7 @@ class ModelFactory:
             available_models["llama3"] = LLM_MODELS["llama3"]
             available_models["solar_10_7b"] = LLM_MODELS["solar_10_7b"]
         
-        if TRANSFORMERS_AVAILABLE or UPSTAGE_AVAILABLE:
+        if TRANSFORMERS_AVAILABLE:
             available_models["solar_pro_preview"] = LLM_MODELS["solar_pro_preview"]
             
         return available_models

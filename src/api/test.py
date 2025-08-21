@@ -19,7 +19,7 @@ except ImportError:
 class RAGAPITester:
     """RAG API 테스터"""
     
-    def __init__(self, base_url: str = "http://127.0.0.1:8000"):
+    def __init__(self, base_url: str = "http://127.0.0.1:8110"):
         self.base_url = base_url
         self.test_session_id = f"test_session_{int(time.time())}"
         self.passed_tests = 0
@@ -289,7 +289,7 @@ async def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="FastAPI RAG 시스템 테스트")
-    parser.add_argument("--url", default="http://127.0.0.1:8000", help="API 서버 URL")
+    parser.add_argument("--url", default="http://127.0.0.1:8110", help="API 서버 URL")
     
     args = parser.parse_args()
     

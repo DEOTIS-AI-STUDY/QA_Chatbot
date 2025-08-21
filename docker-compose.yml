@@ -28,7 +28,7 @@ services:
   #     dockerfile: Dockerfile
   #   container_name: rag_api_server
   #   ports:
-  #     - "8000:8000"
+  #     - "8110:8110"
   #   env_file:
   #     - ./.env.prod # 프로젝트 루트의 .env.prod 파일 사용
   #   environment:
@@ -49,7 +49,7 @@ services:
   #     - rag_network
   #   restart: unless-stopped
   #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+  #     test: ["CMD-SHELL", "curl -f http://localhost:8110/health || exit 1"]
   #     interval: 30s
   #     timeout: 10s
   #     retries: 3

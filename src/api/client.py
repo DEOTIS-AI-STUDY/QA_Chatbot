@@ -11,7 +11,7 @@ from typing import Dict, Any
 class RAGAPIClient:
     """RAG API 클라이언트"""
     
-    def __init__(self, base_url: str = "http://127.0.0.1:8000"):
+    def __init__(self, base_url: str = "http://127.0.0.1:8110"):
         self.base_url = base_url.rstrip('/')
         self.session = None
     
@@ -164,7 +164,7 @@ def sync_example():
     """동기 버전 예제"""
     import requests
     
-    base_url = "http://127.0.0.1:8000"
+    base_url = "http://127.0.0.1:8110"
     
     print("🔍 RAG API 동기 클라이언트 테스트")
     

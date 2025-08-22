@@ -20,6 +20,38 @@ from core.config import (
 
 
 class ElasticsearchManager:
+    @staticmethod
+    def keyword_search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """키워드(단순 텍스트) 기반 검색"""
+        config = ElasticsearchManager.get_connection_config()
+        es = Elasticsearch(**config)
+        if not es.indices.exists(index=INDEX_NAME):
+            return []
+        body = {
+            "query": {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["page_content", "metadata.filename", "metadata.source"],
+                    "type": "best_fields"
+                }
+            },
+            "size": top_k
+        }
+        try:
+            res = es.search(index=INDEX_NAME, body=body)
+            hits = res.get("hits", {}).get("hits", [])
+            results = []
+            for hit in hits:
+                doc = {
+                    "score": hit.get("_score"),
+                    "content": hit.get("_source", {}).get("page_content"),
+                    "metadata": hit.get("_source", {}).get("metadata", {})
+                }
+                results.append(doc)
+            return results
+        except Exception as e:
+            print(f"[ElasticsearchManager] 키워드 검색 오류: {e}")
+            return []
     """Elasticsearch 관리 클래스"""
     
     @staticmethod

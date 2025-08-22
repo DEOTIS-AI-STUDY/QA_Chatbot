@@ -25,11 +25,13 @@ langchain-huggingface==0.3.1
 ollama>=0.1.0
 
 # ===== 벡터 데이터베이스 =====
-elasticsearch==8.11.0
+elasticsearch==8.13.0
 
 # ===== PDF 및 문서 처리 =====
 pypdf>=3.0.0
 python-docx>=0.8.11
+reportlab>=4.0.0
+fpdf2>=2.7.0
 
 # ===== 임베딩 및 ML (C++ 빌드 문제 해결) =====
 # sentence-transformers와 호환되는 안정 버전 사용

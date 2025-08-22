@@ -12,11 +12,13 @@ import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
+from io import BytesIO
 import asyncio
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -50,6 +52,10 @@ try:
 except ImportError:
     # 로컬에서 직접 실행할 때
     from langfuse_config import get_langfuse_manager, get_langfuse_callback
+
+# 파일 변환 모듈 import  
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from converters.factory import FileConverterFactory
 
 # Elasticsearch 가용성 확인
 try:
@@ -423,6 +429,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 정적 파일 서빙 설정
+current_api_dir = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=current_api_dir), name="static")
+
 
 # Pydantic 모델 정의
 class QueryRequest(BaseModel):
@@ -449,6 +459,24 @@ class LangfuseUsageResponse(BaseModel):
     observation_count: int
 
 
+# 파일 변환 관련 모델
+class ConversionRequest(BaseModel):
+    output_format: str = Field(..., description="출력 형식 (txt, json, pdf)")
+    conversion_type: str = Field(default="default", description="변환 타입")
+
+class ConversionResponse(BaseModel):
+    success: bool
+    message: str
+    filename: Optional[str] = None
+    file_size: Optional[int] = None
+    conversion_type: str
+    processing_time: float
+
+class SupportedFormatsResponse(BaseModel):
+    supported_formats: List[str]
+    conversion_types: Dict[str, List[str]]
+
+
 # API 엔드포인트
 @app.get("/")
 async def root():
@@ -458,6 +486,13 @@ async def root():
         "version": "1.0.0",
         "status": "running"
     }
+
+@app.get("/converter/test")
+async def converter_test_page():
+    """파일 변환 테스트 페이지"""
+    import os
+    html_path = os.path.join(os.path.dirname(__file__), "converter_test.html")
+    return FileResponse(html_path)
 
 @app.get("/health")
 async def health_check():
@@ -711,6 +746,246 @@ async def get_langfuse_metrics():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"메트릭 조회 실패: {str(e)}")
+
+
+# 파일 변환 API
+@app.get("/converter/formats", tags=["File Conversion"], response_model=SupportedFormatsResponse)
+async def get_supported_formats():
+    """지원하는 파일 변환 형식 조회
+    
+    반환 데이터:
+    - supported_formats: 지원하는 출력 형식 목록
+    - conversion_types: 각 형식별 변환 타입 목록
+    """
+    try:
+        supported_formats = FileConverterFactory.get_supported_formats()
+        conversion_types = {}
+        
+        for format_name in supported_formats:
+            conversion_types[format_name] = FileConverterFactory.get_conversion_types(format_name)
+        
+        return SupportedFormatsResponse(
+            supported_formats=supported_formats,
+            conversion_types=conversion_types
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"지원 형식 조회 실패: {str(e)}")
+
+
+@app.post("/converter/convert", tags=["File Conversion"])
+async def convert_docx_file(
+    file: UploadFile = File(...),
+    output_format: str = Form(...),
+    conversion_type: str = Form(default="default")
+):
+    """DOCX 파일을 다른 형식으로 변환
+    
+    Parameters:
+    - **file**: 변환할 DOCX 파일
+    - **output_format**: 출력 형식 (txt, json, pdf)
+    - **conversion_type**: 변환 타입 (default, simple, detailed, formatted)
+    
+    Returns:
+    - 변환된 파일을 다운로드 형태로 반환
+    """
+    start_time = time.time()
+    
+    try:
+        # 파일 형식 검증
+        if not file.filename.lower().endswith(('.docx', '.doc')):
+            raise HTTPException(
+                status_code=400, 
+                detail="DOCX 또는 DOC 파일만 지원됩니다."
+            )
+        
+        # 파일 크기 검증 (예: 10MB 제한)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        file_content = await file.read()
+        
+        if len(file_content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail="파일 크기가 10MB를 초과합니다."
+            )
+        
+        # 출력 형식 검증
+        supported_formats = FileConverterFactory.get_supported_formats()
+        if output_format.lower() not in supported_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"지원하지 않는 출력 형식입니다. 지원 형식: {', '.join(supported_formats)}"
+            )
+        
+        # 변환 타입 검증
+        supported_types = FileConverterFactory.get_conversion_types(output_format)
+        if conversion_type not in supported_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"지원하지 않는 변환 타입입니다. 지원 타입: {', '.join(supported_types)}"
+            )
+        
+        # 파일 변환 수행
+        print(f"🔄 변환 시작: {output_format} 형식, {conversion_type} 타입")
+        try:
+            converted_content, mime_type, file_extension = FileConverterFactory.convert_docx(
+                docx_content=file_content,
+                output_format=output_format,
+                conversion_type=conversion_type
+            )
+            print(f"✅ 변환 완료: {len(converted_content)} bytes, MIME: {mime_type}")
+        except Exception as conv_error:
+            print(f"❌ 변환 실패: {type(conv_error).__name__}: {str(conv_error)}")
+            import traceback
+            print(f"스택 트레이스:\n{traceback.format_exc()}")
+            raise conv_error
+        
+        # 출력 파일명 생성 - 한국어 파일명 안전 처리
+        base_filename = file.filename.rsplit('.', 1)[0]
+        
+        # 파일명에서 한국어나 특수문자 제거하여 안전한 파일명 생성
+        import re
+        safe_base_filename = re.sub(r'[^\w\-.]', '', base_filename)  # 언더스코어 제거
+        
+        # 빈 파일명인 경우 기본값 사용
+        if not safe_base_filename or safe_base_filename.isspace():
+            safe_base_filename = "converted_document"
+        
+        # conversion_type이 "default"인 경우 파일명에 포함하지 않음
+        if conversion_type == "default":
+            output_filename = f"{safe_base_filename}.{file_extension}"
+        else:
+            output_filename = f"{safe_base_filename}_{conversion_type}.{file_extension}"
+        
+        processing_time = time.time() - start_time
+        
+        # 파일명과 헤더를 안전하게 처리
+        try:
+            print(f"🔍 파일명 생성: {output_filename}")
+            print(f"🔍 MIME 타입: {mime_type}")
+            print(f"🔍 파일 크기: {len(converted_content)} bytes")
+            
+            # 헤더 값들을 안전하게 처리 - ASCII로 변환
+            safe_filename = output_filename.encode('ascii', errors='ignore').decode('ascii')
+            if not safe_filename.strip():
+                safe_filename = f"converted_file.{file_extension}"
+            
+            safe_headers = {
+                "Content-Disposition": f"attachment; filename=\"{safe_filename}\"",
+                "X-Processing-Time": str(processing_time),
+                "X-File-Size": str(len(converted_content)),
+                "X-Conversion-Type": conversion_type
+            }
+            
+            print(f"🔍 안전한 헤더: {safe_headers}")
+            
+            # 변환된 파일을 스트리밍 응답으로 반환
+            response = StreamingResponse(
+                BytesIO(converted_content),
+                media_type=mime_type,
+                headers=safe_headers
+            )
+            
+            print("✅ StreamingResponse 생성 완료")
+            return response
+            
+        except Exception as header_error:
+            print(f"❌ 헤더 처리 오류: {header_error}")
+            import traceback
+            print(f"스택 트레이스:\n{traceback.format_exc()}")
+            
+            # 최소한의 헤더로 재시도
+            response = StreamingResponse(
+                BytesIO(converted_content),
+                media_type=mime_type,
+                headers={
+                    "Content-Disposition": "attachment; filename=\"converted_file\"",
+                }
+            )
+            return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        processing_time = time.time() - start_time
+        raise HTTPException(
+            status_code=500, 
+            detail=f"파일 변환 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@app.post("/converter/convert-info", tags=["File Conversion"], response_model=ConversionResponse)
+async def convert_docx_file_info(
+    file: UploadFile = File(...),
+    output_format: str = Form(...),
+    conversion_type: str = Form(default="default")
+):
+    """DOCX 파일 변환 정보만 반환 (실제 파일 다운로드 없이)
+    
+    Parameters:
+    - **file**: 변환할 DOCX 파일
+    - **output_format**: 출력 형식 (txt, json, pdf)
+    - **conversion_type**: 변환 타입
+    
+    Returns:
+    - 변환 결과 정보 (파일 크기, 처리 시간 등)
+    """
+    start_time = time.time()
+    
+    try:
+        # 파일 형식 검증
+        if not file.filename.lower().endswith(('.docx', '.doc')):
+            raise HTTPException(
+                status_code=400, 
+                detail="DOCX 또는 DOC 파일만 지원됩니다."
+            )
+        
+        file_content = await file.read()
+        
+        # 파일 변환 수행
+        converted_content, mime_type, file_extension = FileConverterFactory.convert_docx(
+            docx_content=file_content,
+            output_format=output_format,
+            conversion_type=conversion_type
+        )
+        
+        # 출력 파일명 생성 - 한국어 파일명 안전 처리
+        base_filename = file.filename.rsplit('.', 1)[0]
+        
+        # 파일명에서 한국어나 특수문자 제거하여 안전한 파일명 생성
+        import re
+        safe_base_filename = re.sub(r'[^\w\-.]', '', base_filename)  # 언더스코어 제거
+        
+        # 빈 파일명인 경우 기본값 사용
+        if not safe_base_filename or safe_base_filename.isspace():
+            safe_base_filename = "converted_document"
+        
+        # conversion_type이 "default"인 경우 파일명에 포함하지 않음
+        if conversion_type == "default":
+            output_filename = f"{safe_base_filename}.{file_extension}"
+        else:
+            output_filename = f"{safe_base_filename}_{conversion_type}.{file_extension}"
+        
+        processing_time = time.time() - start_time
+        
+        return ConversionResponse(
+            success=True,
+            message="파일 변환이 성공적으로 완료되었습니다.",
+            filename=output_filename,
+            file_size=len(converted_content),
+            conversion_type=conversion_type,
+            processing_time=processing_time
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        processing_time = time.time() - start_time
+        return ConversionResponse(
+            success=False,
+            message=f"파일 변환 실패: {str(e)}",
+            conversion_type=conversion_type,
+            processing_time=processing_time
+        )
 
 
 # 에러 핸들러

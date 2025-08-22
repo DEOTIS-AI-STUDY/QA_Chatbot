@@ -1,7 +1,7 @@
 services:
   # Elasticsearch (기존 설정 재사용)
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
     container_name: rag_elasticsearch
     environment:
       - discovery.type=single-node

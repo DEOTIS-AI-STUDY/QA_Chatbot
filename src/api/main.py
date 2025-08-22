@@ -211,17 +211,17 @@ class FastAPIRAGSystem:
         return await asyncio.get_event_loop().run_in_executor(None, _initialize_rag_system)
     
     async def process_query_async(self, query: str, session_id: str = "default") -> Dict[str, Any]:
-        """질의 처리 (비동기 버전)"""
+        """질의 처리 (비동기 버전, 의미+키워드 검색 병합)"""
         if not self.is_initialized or not self.rag_chain:
             return {
                 "status": "error",
                 "message": "RAG 시스템이 초기화되지 않았습니다."
             }
-        
+
         def _process_query():
             try:
                 start_time = time.time()
-                
+
                 # Langfuse 트레이스 생성
                 trace = self.langfuse_manager.create_trace(
                     name="rag_query",
@@ -231,34 +231,68 @@ class FastAPIRAGSystem:
                         "top_k": self.top_k
                     }
                 )
-                
+
                 # 대화 기록 관리자 가져오기
                 chat_manager = self.get_chat_manager(session_id)
-                
-                # 대화 기록으로 질문 재정의.
+
+                # 대화 기록으로 질문 재정의 (키워드 검색 포함)
                 history = chat_manager.build_history()
                 print(f"🔍 대화 기록: {history}")
                 print(f"🔍 질의: {query}")
+                
+                # 질문 재정의를 위한 초기 검색 (의미 + 키워드)
+                initial_semantic_docs = self.retriever.get_relevant_documents(query)
+                initial_keyword_results = ElasticsearchManager.keyword_search(query, top_k=3)
+                
+                # 초기 검색 결과 병합 (재질의용)
+                initial_context = []
+                for doc in initial_semantic_docs[:3]:  # 상위 3개만
+                    initial_context.append(getattr(doc, "page_content", str(doc)))
+                for kdoc in initial_keyword_results[:2]:  # 상위 2개만
+                    content = kdoc.get("content", "")
+                    if content and content not in initial_context:
+                        initial_context.append(content)
+                
+                # combined_context = history + "\n\n검색된 관련 정보:\n" + "\n".join(initial_context) // 질문을 알맞게 변경하기위함이기에 history만을 context에 사용
                 refined_query = create_llm_chain(self.llm_model, prompt_for_refined_query).run({"question": query, "context": history})
                 print(f"🔍 정제된 질의: {refined_query}")
 
-                # 재정의된 질문으로 DB 검색
-                docs = self.retriever.get_relevant_documents(refined_query)
-                docs_text = "\n".join([getattr(doc, "page_content", str(doc)) for doc in docs])
-                print(f"🔍 검색된 문서 내용: {docs_text}")
+                # 정제된 질의로 최종 검색 (의미 + 키워드)
+                docs_semantic = self.retriever.get_relevant_documents(refined_query)
+                print(f"🔍 의미 기반 검색 결과 개수: {len(docs_semantic)}")
+
+                # 키워드 기반 검색
+                keyword_results = ElasticsearchManager.keyword_search(refined_query, top_k=self.top_k)
+                print(f"🔍 키워드 기반 검색 결과 개수: {len(keyword_results)}")
+
+                # 의미/키워드 결과 병합 (중복 제거, 우선순위: 의미 기반 → 키워드 기반)
+                seen = set()
+                merged_docs = []
+                # 의미 기반 결과 먼저
+                for doc in docs_semantic:
+                    content = getattr(doc, "page_content", str(doc))
+                    if content not in seen:
+                        merged_docs.append(content)
+                        seen.add(content)
+                # 키워드 기반 결과 추가
+                for kdoc in keyword_results:
+                    content = kdoc.get("content", "")
+                    if content and content not in seen:
+                        merged_docs.append(content)
+                        seen.add(content)
+
+                docs_text = "\n".join(merged_docs)
+                print(f"🔍 병합된 문서 개수: {len(merged_docs)}")
 
                 # 검색된 자료와 재정의 질문을 LLM에 넘겨서 답변 생성
                 result = create_llm_chain(self.llm_model, prompt_for_query).invoke({"question": refined_query, "context": docs_text})
 
-                # RAG 체인을 통한 답변 생성
-                #result = self.rag_chain.invoke({"query": query})
-                
                 # 디버깅: 실제 응답 구조 출력
                 print(f"🔍 RAG 체인 응답 구조: {result}")
                 print(f"🔍 응답 키들: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-                
+
                 processing_time = time.time() - start_time
-                
+
                 # RetrievalQA는 'result' 키를 사용함
                 if result and ('answer' in result or 'result' in result or 'text' in result):
                     answer = result.get('answer') or result.get('result') or result.get('text')
@@ -268,7 +302,7 @@ class FastAPIRAGSystem:
                     print(f"🔍 답변 요약: {answer_summary}")
                     # 대화 기록에 질문과 답변 추가
                     chat_manager.add_chat(refined_query, answer_summary)
-                    
+
                     # Langfuse에 결과 로그
                     if trace:
                         self.langfuse_manager.log_generation(
@@ -278,18 +312,33 @@ class FastAPIRAGSystem:
                             output=answer,
                             metadata={
                                 "processing_time": processing_time,
-                                "retrieved_docs_count": len(result.get('source_documents', [])),
+                                "retrieved_docs_count": len(merged_docs),
                                 "model": self.model_choice
                             }
                         )
-                    
+
+                    # retrieved_docs에 의미/키워드 결과 모두 포함
+                    retrieved_docs = []
+                    for doc in docs_semantic:
+                        retrieved_docs.append({
+                            "type": "semantic",
+                            "content": getattr(doc, "page_content", str(doc)),
+                            "metadata": getattr(doc, "metadata", {})
+                        })
+                    for kdoc in keyword_results:
+                        retrieved_docs.append({
+                            "type": "keyword",
+                            "content": kdoc.get("content", ""),
+                            "metadata": kdoc.get("metadata", {})
+                        })
+
                     return {
                         "status": "success",
                         "answer": answer,
                         "query": query,
                         "session_id": session_id,
                         "processing_time": processing_time,
-                        "retrieved_docs": result.get('source_documents', [])
+                        "retrieved_docs": retrieved_docs
                     }
                 else:
                     # Langfuse에 에러 로그
@@ -302,13 +351,13 @@ class FastAPIRAGSystem:
                                 "processing_time": processing_time
                             }
                         )
-                    
+
                     return {
                         "status": "error",
                         "message": f"답변을 생성할 수 없습니다. 응답 구조: {result}",
                         "processing_time": processing_time
                     }
-                    
+
             except Exception as e:
                 # Langfuse에 예외 로그
                 if 'trace' in locals() and trace:
@@ -320,13 +369,13 @@ class FastAPIRAGSystem:
                             "processing_time": time.time() - start_time
                         }
                     )
-                
+
                 return {
                     "status": "error",
                     "message": f"질의 처리 오류: {str(e)}",
                     "processing_time": time.time() - start_time
                 }
-        
+
         return await asyncio.get_event_loop().run_in_executor(None, _process_query)
     
     def get_system_info(self) -> Dict[str, Any]:

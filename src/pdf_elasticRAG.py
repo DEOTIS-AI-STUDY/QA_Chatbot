@@ -45,7 +45,7 @@ if not OPENAI_API_KEY and not GOOGLE_API_KEY:
     exit(-1)
 
 # ===== Config =====
-PDF_DIR = os.getenv("PDF_DIR", "pdf")  # 읽을 PDF 폴더
+PDF_DIR = os.getenv("PDF_DIR", "data/pdf")  # 읽을 PDF 폴더
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
 INDEX_NAME = os.getenv("INDEX_NAME", "pdf_rag")
 

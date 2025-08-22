@@ -159,7 +159,7 @@ ELASTICSEARCH_URL=http://localhost:9200
 INDEX_NAME=unified_rag
 
 # PDF 디렉토리
-PDF_DIR=pdf
+PDF_DIR=data/pdf
 EOF
     log_warning "API 키를 .env 파일에 설정해주세요!"
 fi

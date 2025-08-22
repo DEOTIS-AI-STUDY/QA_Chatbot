@@ -65,7 +65,7 @@ services:
       - INDEX_NAME=unified_rag_prod
 
       # PDF 디렉토리 설정
-      - PDF_DIR=pdf
+      - PDF_DIR=data/pdf
 
       # Streamlit 설정
       - STREAMLIT_SERVER_PORT=8501
@@ -88,8 +88,8 @@ services:
       # 운영 환경 설정
       - ENVIRONMENT=production
     volumes:
-      # PDF 파일 볼륨 마운트 (로컬 pdf 디렉토리를 컨테이너에 마운트)
-      - ./pdf:/app/pdf:ro
+      # PDF 파일 볼륨 마운트 (로컬 data/pdf 디렉토리를 컨테이너에 마운트)
+      - ./data/pdf:/app/data/pdf:ro
 
       # 로그 디렉토리 (선택사항)
       - ./logs:/app/logs

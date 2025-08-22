@@ -33,12 +33,6 @@ def initialize_session_state():
         st.session_state.rag_initialized = False
     if "auto_indexing_done" not in st.session_state:
         st.session_state.auto_indexing_done = False
-    
-    # 시스템 시작 시 자동 PDF 인덱싱 실행
-    if not st.session_state.auto_indexing_done:
-        with st.spinner("시스템 초기화 중... PDF 파일 자동 인덱싱"):
-            auto_index_pdfs_on_startup()
-        st.session_state.auto_indexing_done = True
 
 
 def reset_rag_state():
@@ -59,70 +53,6 @@ def show_debug_info():
         st.write(f"qa_chain: {st.session_state.qa_chain}")
         st.write(f"qa_chain type: {type(st.session_state.qa_chain)}")
         st.write(f"qa_chain is None: {st.session_state.qa_chain is None}")
-
-
-def auto_index_pdfs_on_startup():
-    """시스템 시작 시 PDF 자동 인덱싱"""
-    from core.config import PDF_DIR, INDEX_NAME
-    from elasticsearch import Elasticsearch
-    
-    try:
-        # PDF 디렉토리 확인
-        if not os.path.exists(PDF_DIR):
-            os.makedirs(PDF_DIR, exist_ok=True)
-            return
-        
-        # PDF 파일 목록 확인
-        es_manager = ElasticsearchManager()
-        pdf_files = es_manager.list_pdfs(PDF_DIR)
-        
-        if not pdf_files:
-            return
-        
-        # 인덱스 존재 및 문서 수 확인
-        es = Elasticsearch("http://localhost:9200")
-        index_exists = es.indices.exists(index=INDEX_NAME)
-        
-        if index_exists:
-            try:
-                doc_count = es.count(index=INDEX_NAME).get("count", 0)
-                if doc_count > 0:
-                    st.success(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다.")
-                    return
-            except:
-                pass
-        
-        # PDF 파일 인덱싱 실행
-        st.info(f"📄 {len(pdf_files)}개 PDF 파일을 자동 인덱싱합니다...")
-        
-        # 임베딩 모델 생성
-        model_factory = ModelFactory()
-        embeddings = model_factory.create_embedding_model()
-        
-        if embeddings:
-            success, message = es_manager.index_pdfs(
-                pdf_files, 
-                embeddings, 
-                st.session_state.hybrid_tracker
-            )
-            
-            if success:
-                st.success(f"✅ PDF 자동 인덱싱 완료: {message}")
-            else:
-                st.warning(f"⚠️ PDF 자동 인덱싱 실패: {message}")
-        else:
-            st.warning("⚠️ 임베딩 모델 로드 실패")
-            
-    except Exception as e:
-        st.warning(f"⚠️ PDF 자동 인덱싱 오류: {str(e)}")
-        st.write(f"qa_chain == False: {st.session_state.qa_chain == False}")
-        st.write(f"bool(qa_chain): {bool(st.session_state.qa_chain)}")
-        st.write(f"rag_initialized: {st.session_state.get('rag_initialized', False)}")
-        st.write(f"selected_model: {st.session_state.get('selected_model', 'None')}")
-        
-        # 상태 리셋 버튼
-        if st.button("🔄 상태 리셋", key="reset_debug"):
-            reset_rag_state()
 
 
 # 공통 모듈 사용으로 대체된 함수들

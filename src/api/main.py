@@ -736,57 +736,98 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1", help="서버 호스트")
     parser.add_argument("--port", type=int, default=8110, help="서버 포트")
     parser.add_argument("--reload", action="store_true", help="자동 리로드 활성화")
-    parser.add_argument("--init-index", action="store_true", help="PDF 자동 인덱싱만 수행하고 종료")
+    parser.add_argument("--init-index", action="store_true", help="파일 자동 인덱싱만 수행하고 종료")
+    parser.add_argument("--file-types", nargs='+', default=['pdf'], 
+                       choices=['pdf', 'txt', 'json', 'all'], 
+                       help="인덱싱할 파일 타입 선택 (기본값: pdf)")
     args = parser.parse_args()
 
-    def auto_index_pdfs():
+    def auto_index_files():
         from core.models import ModelFactory
         from utils.elasticsearch import ElasticsearchManager
-        import glob
         import time
-        print(f"\n📄 PDF 자동 인덱싱 시작 (INDEX_NAME: {INDEX_NAME})")
-        if not os.path.exists(PDF_DIR):
-            print(f"📁 PDF 디렉토리({PDF_DIR})가 없습니다. 생성합니다...")
-            os.makedirs(PDF_DIR, exist_ok=True)
-            print("📄 PDF 파일이 없어서 인덱싱을 건너뜁니다.")
-            return
-        pdf_files = glob.glob(os.path.join(PDF_DIR, '*.pdf'))
-        if not pdf_files:
-            print("📄 PDF 파일이 없어서 인덱싱을 건너뜁니다.")
-            return
+        
+        # 파일 타입 처리
+        file_types = args.file_types.copy()
+        if 'all' in file_types:
+            file_types = ['pdf', 'txt', 'json']
+        
+        print(f"\n� 파일 자동 인덱싱 시작 (INDEX_NAME: {INDEX_NAME})")
+        print(f"📋 대상 파일 타입: {', '.join(file_types)}")
+        
+        # data 디렉토리 확인 및 생성
+        data_dir = "data"
+        if not os.path.exists(data_dir):
+            print(f"📁 데이터 디렉토리({data_dir})가 없습니다. 생성합니다...")
+            os.makedirs(data_dir, exist_ok=True)
+        
+        # 각 파일 타입별 디렉토리 및 파일 확인
+        es_manager = ElasticsearchManager()
+        total_files = 0
+        file_info = {}
+        
+        for file_type in file_types:
+            type_dir = os.path.join(data_dir, file_type)
+            if not os.path.exists(type_dir):
+                print(f"� {file_type.upper()} 디렉토리({type_dir})가 없습니다. 생성합니다...")
+                os.makedirs(type_dir, exist_ok=True)
+                file_info[file_type] = []
+            else:
+                if file_type == 'pdf':
+                    files = es_manager.list_pdfs(type_dir)
+                elif file_type == 'txt':
+                    files = es_manager.list_txt_files(type_dir)
+                elif file_type == 'json':
+                    files = es_manager.list_json_files(type_dir)
+                else:
+                    files = []
+                
+                file_info[file_type] = files
+                total_files += len(files)
+                print(f"📄 {file_type.upper()} 파일: {len(files)}개")
+                for file_path in files:
+                    print(f"  - {os.path.basename(file_path)}")
+        
+        if total_files == 0:
+            print("📄 인덱싱할 파일이 없습니다. 기존 문서 삭제를 진행합니다.")
+        
+        # 기존 인덱스 확인
         try:
             es = Elasticsearch(os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"), timeout=10)
             if es.indices.exists(index=INDEX_NAME):
                 doc_count = es.count(index=INDEX_NAME).get("count", 0)
                 if doc_count > 0:
-                    print(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다. 인덱싱을 건너뜁니다.")
-                    return
+                    print(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다. 기존 인덱스를 삭제하고 새로 생성합니다.")
         except Exception as check_error:
             print(f"⚠️ 인덱스 확인 중 오류: {str(check_error)}, 인덱싱을 계속 진행합니다...")
-        print(f"📄 {len(pdf_files)}개 PDF 파일을 자동 인덱싱합니다...")
-        for pdf_file in pdf_files:
-            print(f"  - {os.path.basename(pdf_file)}")
+        
+        print(f"📄 총 {total_files}개 파일을 자동 인덱싱합니다...")
+        
         try:
             class SimpleTracker:
                 def track_preprocessing_stage(self, stage):
                     print(f"🔄 {stage}")
                 def end_preprocessing_stage(self, stage):
                     print(f"✅ {stage} 완료")
+            
             tracker = SimpleTracker()
-            es_manager = ElasticsearchManager()
             embedding_model = ModelFactory().create_embedding_model()
             indexing_start = time.time()
-            success, message = es_manager.index_pdfs(pdf_files, embedding_model, tracker)
+            
+            # 통합 인덱싱 실행
+            success, message = es_manager.index_all_files(data_dir, embedding_model, tracker, file_types)
+            
             indexing_time = time.time() - indexing_start
             if success:
-                print(f"✅ PDF 자동 인덱싱 완료: {message} ({indexing_time:.2f}초)")
+                print(f"✅ 파일 자동 인덱싱 완료: {message} ({indexing_time:.2f}초)")
             else:
-                print(f"❌ PDF 자동 인덱싱 실패: {message}")
+                print(f"❌ 파일 자동 인덱싱 실패: {message}")
+                
         except Exception as e:
-            print(f"❌ PDF 자동 인덱싱 오류: {str(e)}")
+            print(f"❌ 파일 자동 인덱싱 오류: {str(e)}")
 
     if args.init_index:
-        auto_index_pdfs()
+        auto_index_files()
         print("\n✅ --init-index 작업이 완료되었습니다. 서버는 실행하지 않습니다.")
         sys.exit(0)
 

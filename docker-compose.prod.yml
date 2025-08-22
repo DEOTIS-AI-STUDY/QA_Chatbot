@@ -3,7 +3,7 @@ version: "3.8"
 services:
   # Elasticsearch 서비스
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
     container_name: elasticsearch-prod
     environment:
       - discovery.type=single-node
@@ -31,7 +31,7 @@ services:
 
   # Kibana 서비스 (선택사항)
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.0
+    image: docker.elastic.co/kibana/kibana:8.13.0
     container_name: kibana-prod
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200

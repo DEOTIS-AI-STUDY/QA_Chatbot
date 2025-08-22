@@ -659,64 +659,20 @@ class ElasticsearchManager:
                     print(f"JSON 파일 처리 오류 ({json_path}): {e}")
                 hybrid_tracker.end_preprocessing_stage(f"JSON_처리_{os.path.basename(json_path)}")
         
-        # TXT 파일 처리
-        if 'txt' in file_types:
-            txt_files = ElasticsearchManager.list_txt_files(data_dir)
-            for txt_path in txt_files:
-                hybrid_tracker.track_preprocessing_stage(f"TXT_처리_{os.path.basename(txt_path)}")
-                try:
-                    loader = TextLoader(txt_path, encoding='utf-8')
-                    docs = loader.load()
-                    
-                    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-                    chunks = splitter.split_documents(docs)
-                    
-                    for chunk in chunks:
-                        chunk.metadata.update({
-                            "source": txt_path,
-                            "filename": os.path.basename(txt_path),
-                            "category": "TXT"
-                        })
-                    
-                    all_documents.extend(chunks)
-                    processed_files += 1
-                except Exception as e:
-                    print(f"TXT 파일 처리 오류 ({txt_path}): {e}")
-                hybrid_tracker.end_preprocessing_stage(f"TXT_처리_{os.path.basename(txt_path)}")
-        
-        # JSON 파일 처리
-        if 'json' in file_types:
-            json_files = ElasticsearchManager.list_json_files(data_dir)
-            for json_path in json_files:
-                hybrid_tracker.track_preprocessing_stage(f"JSON_처리_{os.path.basename(json_path)}")
-                try:
-                    with open(json_path, 'r', encoding='utf-8') as f:
-                        json_data = json.load(f)
-                    
-                    text_content = ElasticsearchManager._extract_text_from_json(json_data)
-                    
-                    if text_content:
-                        doc = Document(
-                            page_content=text_content,
-                            metadata={
-                                "source": json_path,
-                                "filename": os.path.basename(json_path),
-                                "category": "JSON"
-                            }
-                        )
-                        
-                        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-                        chunks = splitter.split_documents([doc])
-                        
-                        all_documents.extend(chunks)
-                        processed_files += 1
-                except Exception as e:
-                    print(f"JSON 파일 처리 오류 ({json_path}): {e}")
-                hybrid_tracker.end_preprocessing_stage(f"JSON_처리_{os.path.basename(json_path)}")
-        
         if not all_documents:
+            # 파일이 없어도 카테고리 삭제는 이미 완료됨
             hybrid_tracker.end_preprocessing_stage("전체_파일_인덱싱_시작")
-            return False, "추출된 텍스트가 없습니다."
+            
+            # 현재 인덱스 문서 수 확인
+            try:
+                es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
+                if success:
+                    cnt = es_client.count(index=INDEX_NAME).get("count", 0)
+                    return True, f"선택된 카테고리 삭제 완료. 처리된 파일: 0개, 현재 문서 수: {cnt}"
+                else:
+                    return True, "선택된 카테고리 삭제 완료. 처리된 파일: 0개"
+            except:
+                return True, "선택된 카테고리 삭제 완료. 처리된 파일: 0개"
         
         # Elasticsearch에 저장
         hybrid_tracker.track_preprocessing_stage("Elasticsearch_저장")

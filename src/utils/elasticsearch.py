@@ -790,48 +790,40 @@ class ElasticsearchManager:
             for docx_path in docx_files:
                 hybrid_tracker.track_preprocessing_stage(f"DOCX_처리_{os.path.basename(docx_path)}")
                 try:
-                    # DOCX 로딩
-                    doc = DocxDocument(docx_path)
-                    text_content = []
-                    
-                    # 문서의 모든 단락에서 텍스트 추출
-                    for paragraph in doc.paragraphs:
-                        if paragraph.text.strip():
-                            text_content.append(paragraph.text)
-                    
-                    # 표의 텍스트도 추출
-                    for table in doc.tables:
-                        for row in table.rows:
-                            for cell in row.cells:
-                                if cell.text.strip():
-                                    text_content.append(cell.text)
-                    
-                    if text_content:
-                        # Document 객체 생성
-                        full_text = "\n".join(text_content)
-                        langchain_doc = Document(
-                            page_content=full_text,
+                   # DOCX 파일에서 텍스트 추출을 DocParser
+                    from utils.docparser import DocParser
+                    parser = DocParser(docx_path)
+                    text_content = parser.get_text()
+
+                    # 내용을 Document로 추가
+                    doc = Document(
+                        page_content=text_content,
+                        metadata={
+                            "source": docx_path,
+                            "filename": os.path.basename(docx_path),
+                            "category": "DOCX"
+                        }
+                    )
+                    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                    chunks = splitter.split_documents([doc])
+                    all_documents.extend(chunks)
+
+                    # 표 내용도 Document로 추가
+                    table_blocks = parser.get_tables()
+                    for table_content in table_blocks:
+                        # 표 내용은 하나의 chunk로 추가 (분할하지 않음)
+                        table_doc = Document(
+                            page_content=table_content,
                             metadata={
                                 "source": docx_path,
                                 "filename": os.path.basename(docx_path),
                                 "category": "DOCX"
                             }
                         )
-                        
-                        # 텍스트 분할
-                        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-                        chunks = splitter.split_documents([langchain_doc])
-                        
-                        # 메타데이터 보강
-                        for chunk in chunks:
-                            chunk.metadata.update({
-                                "source": docx_path,
-                                "filename": os.path.basename(docx_path),
-                                "category": "DOCX"
-                            })
-                        
-                        all_documents.extend(chunks)
-                        processed_files += 1
+                        all_documents.append(table_doc)
+
+
+                    processed_files += 1
                 except Exception as e:
                     print(f"DOCX 파일 처리 오류 ({docx_path}): {e}")
                 hybrid_tracker.end_preprocessing_stage(f"DOCX_처리_{os.path.basename(docx_path)}")

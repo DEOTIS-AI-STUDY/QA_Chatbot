@@ -738,7 +738,7 @@ if __name__ == "__main__":
     parser.add_argument("--reload", action="store_true", help="자동 리로드 활성화")
     parser.add_argument("--init-index", action="store_true", help="파일 자동 인덱싱만 수행하고 종료")
     parser.add_argument("--file-types", nargs='+', default=['pdf'], 
-                       choices=['pdf', 'txt', 'json', 'all'], 
+                       choices=['pdf', 'txt', 'json', 'docx', 'all'], 
                        help="인덱싱할 파일 타입 선택 (기본값: pdf)")
     args = parser.parse_args()
 
@@ -750,7 +750,7 @@ if __name__ == "__main__":
         # 파일 타입 처리
         file_types = args.file_types.copy()
         if 'all' in file_types:
-            file_types = ['pdf', 'txt', 'json']
+            file_types = ['pdf', 'txt', 'json', 'docx']
         
         print(f"\n� 파일 자동 인덱싱 시작 (INDEX_NAME: {INDEX_NAME})")
         print(f"📋 대상 파일 타입: {', '.join(file_types)}")
@@ -779,6 +779,8 @@ if __name__ == "__main__":
                     files = es_manager.list_txt_files(type_dir)
                 elif file_type == 'json':
                     files = es_manager.list_json_files(type_dir)
+                elif file_type == 'docx':
+                    files = es_manager.list_docx_files(type_dir)
                 else:
                     files = []
                 

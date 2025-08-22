@@ -29,6 +29,7 @@ elasticsearch==8.11.0
 
 # ===== PDF 및 문서 처리 =====
 pypdf>=3.0.0
+python-docx>=0.8.11
 
 # ===== 임베딩 및 ML (C++ 빌드 문제 해결) =====
 # sentence-transformers와 호환되는 안정 버전 사용

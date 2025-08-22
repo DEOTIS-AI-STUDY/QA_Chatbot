@@ -10,6 +10,7 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import ElasticsearchStore
 from langchain.schema import Document
+from docx import Document as DocxDocument
 from core.config import (
     ELASTICSEARCH_URL, 
     ELASTICSEARCH_HOST, 
@@ -177,6 +178,20 @@ class ElasticsearchManager:
         for name in names:
             if name.lower().endswith(".txt"):
                 files.append(os.path.join(txt_dir, name))
+        return sorted(files)
+    
+    @staticmethod
+    def list_docx_files(docx_dir: str) -> List[str]:
+        """DOCX 파일 목록 반환"""
+        try:
+            names = os.listdir(docx_dir)
+        except FileNotFoundError:
+            return []
+        
+        files = []
+        for name in names:
+            if name.lower().endswith((".docx", ".doc")):
+                files.append(os.path.join(docx_dir, name))
         return sorted(files)
     
     @staticmethod
@@ -523,6 +538,115 @@ class ElasticsearchManager:
             return False, f"JSON 인덱싱 오류: {str(e)}"
     
     @staticmethod
+    def index_docx_files(docx_files: List[str], embeddings, hybrid_tracker, incremental: bool = True) -> Tuple[bool, str]:
+        """DOCX 파일들을 Elasticsearch에 인덱싱 (증분 업데이트 지원)"""
+        hybrid_tracker.track_preprocessing_stage("DOCX_인덱싱_시작")
+        
+        # 증분 업데이트 모드가 아니면 기존 인덱스 완전 삭제
+        if not incremental:
+            config = ElasticsearchManager.get_connection_config()
+            es = Elasticsearch(**config)
+            if es.indices.exists(index=INDEX_NAME):
+                es.indices.delete(index=INDEX_NAME)
+        else:
+            # 기존 DOCX 카테고리 문서만 삭제
+            success, message = ElasticsearchManager.delete_documents_by_category(["DOCX"])
+            if not success:
+                hybrid_tracker.end_preprocessing_stage("DOCX_인덱싱_시작")
+                return False, f"기존 DOCX 문서 삭제 실패: {message}"
+            print(f"📚 {message}")
+        
+        all_documents = []
+        
+        for docx_path in docx_files:
+            hybrid_tracker.track_preprocessing_stage(f"DOCX_처리_{os.path.basename(docx_path)}")
+            
+            try:
+                # DOCX 로딩
+                doc = DocxDocument(docx_path)
+                text_content = []
+                
+                # 문서의 모든 단락에서 텍스트 추출
+                for paragraph in doc.paragraphs:
+                    if paragraph.text.strip():
+                        text_content.append(paragraph.text)
+                
+                # 표의 텍스트도 추출
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            if cell.text.strip():
+                                text_content.append(cell.text)
+                
+                if text_content:
+                    # Document 객체 생성
+                    full_text = "\n".join(text_content)
+                    langchain_doc = Document(
+                        page_content=full_text,
+                        metadata={
+                            "source": docx_path,
+                            "filename": os.path.basename(docx_path),
+                            "category": "DOCX"
+                        }
+                    )
+                    
+                    # 텍스트 분할
+                    splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=1000, 
+                        chunk_overlap=200
+                    )
+                    chunks = splitter.split_documents([langchain_doc])
+                    
+                    # 메타데이터 보강
+                    for chunk in chunks:
+                        chunk.metadata.update({
+                            "source": docx_path,
+                            "filename": os.path.basename(docx_path),
+                            "category": "DOCX"
+                        })
+                    
+                    all_documents.extend(chunks)
+                
+            except Exception as e:
+                print(f"DOCX 파일 처리 오류 ({docx_path}): {e}")
+                continue
+                
+            hybrid_tracker.end_preprocessing_stage(f"DOCX_처리_{os.path.basename(docx_path)}")
+        
+        if not all_documents:
+            hybrid_tracker.end_preprocessing_stage("DOCX_인덱싱_시작")
+            return False, "추출된 텍스트가 없습니다."
+        
+        # Elasticsearch에 저장
+        hybrid_tracker.track_preprocessing_stage("Elasticsearch_저장")
+        try:
+            # 안전한 Elasticsearch 클라이언트 확인
+            es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
+            if not success:
+                raise Exception(f"Elasticsearch 연결 실패: {message}")
+            
+            # 문서 저장
+            ElasticsearchStore.from_documents(
+                all_documents,
+                embedding=embeddings,
+                es_url=ELASTICSEARCH_URL,
+                index_name=INDEX_NAME
+            )
+            
+            es_client.indices.refresh(index=INDEX_NAME)
+            cnt = es_client.count(index=INDEX_NAME).get("count", 0)
+            
+            hybrid_tracker.end_preprocessing_stage("Elasticsearch_저장")
+            hybrid_tracker.end_preprocessing_stage("DOCX_인덱싱_시작")
+            
+            return True, f"DOCX 인덱싱 완료. 문서 수: {cnt}"
+            
+        except Exception as e:
+            hybrid_tracker.end_preprocessing_stage("Elasticsearch_저장")
+            hybrid_tracker.end_preprocessing_stage("DOCX_인덱싱_시작")
+            return False, f"DOCX 인덱싱 오류: {str(e)}"
+    
+    @staticmethod
     def _extract_text_from_json(json_data: Any, max_depth: int = 10) -> str:
         """JSON 데이터에서 텍스트 추출"""
         if max_depth <= 0:
@@ -554,7 +678,7 @@ class ElasticsearchManager:
     def index_all_files(data_dir: str, embeddings, hybrid_tracker, file_types: List[str] = None, incremental: bool = True) -> Tuple[bool, str]:
         """지정된 디렉토리의 모든 파일 타입을 인덱싱 (증분 업데이트 지원)"""
         if file_types is None:
-            file_types = ['pdf', 'txt', 'json']
+            file_types = ['pdf', 'txt', 'json', 'docx']
         
         hybrid_tracker.track_preprocessing_stage("전체_파일_인덱싱_시작")
         
@@ -658,6 +782,59 @@ class ElasticsearchManager:
                 except Exception as e:
                     print(f"JSON 파일 처리 오류 ({json_path}): {e}")
                 hybrid_tracker.end_preprocessing_stage(f"JSON_처리_{os.path.basename(json_path)}")
+        
+        # DOCX 파일 처리
+        if 'docx' in file_types:
+            docx_dir = os.path.join(data_dir, 'docx')
+            docx_files = ElasticsearchManager.list_docx_files(docx_dir)
+            for docx_path in docx_files:
+                hybrid_tracker.track_preprocessing_stage(f"DOCX_처리_{os.path.basename(docx_path)}")
+                try:
+                    # DOCX 로딩
+                    doc = DocxDocument(docx_path)
+                    text_content = []
+                    
+                    # 문서의 모든 단락에서 텍스트 추출
+                    for paragraph in doc.paragraphs:
+                        if paragraph.text.strip():
+                            text_content.append(paragraph.text)
+                    
+                    # 표의 텍스트도 추출
+                    for table in doc.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                if cell.text.strip():
+                                    text_content.append(cell.text)
+                    
+                    if text_content:
+                        # Document 객체 생성
+                        full_text = "\n".join(text_content)
+                        langchain_doc = Document(
+                            page_content=full_text,
+                            metadata={
+                                "source": docx_path,
+                                "filename": os.path.basename(docx_path),
+                                "category": "DOCX"
+                            }
+                        )
+                        
+                        # 텍스트 분할
+                        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                        chunks = splitter.split_documents([langchain_doc])
+                        
+                        # 메타데이터 보강
+                        for chunk in chunks:
+                            chunk.metadata.update({
+                                "source": docx_path,
+                                "filename": os.path.basename(docx_path),
+                                "category": "DOCX"
+                            })
+                        
+                        all_documents.extend(chunks)
+                        processed_files += 1
+                except Exception as e:
+                    print(f"DOCX 파일 처리 오류 ({docx_path}): {e}")
+                hybrid_tracker.end_preprocessing_stage(f"DOCX_처리_{os.path.basename(docx_path)}")
         
         if not all_documents:
             # 파일이 없어도 카테고리 삭제는 이미 완료됨

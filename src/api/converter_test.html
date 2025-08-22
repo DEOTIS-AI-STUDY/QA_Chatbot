@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DOCX 파일 변환기</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        background-color: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+        text-align: center;
+        margin-bottom: 30px;
+      }
+      .form-group {
+        margin-bottom: 20px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: #555;
+      }
+      input[type="file"],
+      select {
+        width: 100%;
+        padding: 10px;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        font-size: 16px;
+      }
+      button {
+        background-color: #007bff;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        margin-right: 10px;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      button:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+      }
+      .result {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 5px;
+        display: none;
+      }
+      .success {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+      .error {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+      }
+      .loading {
+        text-align: center;
+        color: #007bff;
+      }
+      .supported-formats {
+        background-color: #e7f3ff;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>📄 DOCX 파일 변환기</h1>
+
+      <div class="supported-formats">
+        <h3>지원하는 변환 형식</h3>
+        <div id="supportedFormats">로딩 중...</div>
+      </div>
+
+      <form id="convertForm">
+        <div class="form-group">
+          <label for="file">DOCX 파일 선택:</label>
+          <input
+            type="file"
+            id="file"
+            name="file"
+            accept=".docx,.doc"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="outputFormat">출력 형식:</label>
+          <select id="outputFormat" name="outputFormat" required>
+            <option value="">선택하세요</option>
+            <option value="txt">TXT</option>
+            <option value="json">JSON</option>
+            <option value="pdf">PDF</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="conversionType">변환 타입:</label>
+          <select id="conversionType" name="conversionType">
+            <option value="default">기본</option>
+          </select>
+        </div>
+
+        <button type="button" onclick="convertFile()">
+          파일 변환 및 다운로드
+        </button>
+        <button type="button" onclick="getConversionInfo()">
+          변환 정보만 확인
+        </button>
+      </form>
+
+      <div id="result" class="result"></div>
+    </div>
+
+    <script>
+      // 현재 페이지의 호스트를 기반으로 API URL 설정
+      const API_BASE_URL = window.location.origin;
+
+      // 페이지 로드 시 지원 형식 정보 가져오기
+      window.onload = async function () {
+        await loadSupportedFormats();
+      };
+
+      async function loadSupportedFormats() {
+        try {
+          const response = await fetch(`${API_BASE_URL}/converter/formats`);
+          const data = await response.json();
+
+          const formatsDiv = document.getElementById("supportedFormats");
+          let html = "<ul>";
+
+          data.supported_formats.forEach((format) => {
+            const types = data.conversion_types[format] || [];
+            html += `<li><strong>${format.toUpperCase()}</strong>: ${types.join(
+              ", "
+            )}</li>`;
+          });
+
+          html += "</ul>";
+          formatsDiv.innerHTML = html;
+
+          // 출력 형식 변경 시 변환 타입 업데이트
+          document.getElementById("outputFormat").onchange = function () {
+            updateConversionTypes(this.value, data.conversion_types);
+          };
+        } catch (error) {
+          console.error("지원 형식 로드 실패:", error);
+          document.getElementById("supportedFormats").innerHTML = "로드 실패";
+        }
+      }
+
+      function updateConversionTypes(format, conversionTypes) {
+        const conversionTypeSelect = document.getElementById("conversionType");
+        conversionTypeSelect.innerHTML = "";
+
+        if (format && conversionTypes[format]) {
+          conversionTypes[format].forEach((type) => {
+            const option = document.createElement("option");
+            option.value = type;
+            option.textContent = getTypeDisplayName(type);
+            if (type === "default") option.selected = true;
+            conversionTypeSelect.appendChild(option);
+          });
+        }
+      }
+
+      function getTypeDisplayName(type) {
+        const names = {
+          default: "기본",
+          simple: "간단",
+          detailed: "상세",
+          formatted: "서식 포함",
+        };
+        return names[type] || type;
+      }
+
+      async function convertFile() {
+        const fileInput = document.getElementById("file");
+        const outputFormat = document.getElementById("outputFormat").value;
+        const conversionType = document.getElementById("conversionType").value;
+
+        if (!fileInput.files[0] || !outputFormat) {
+          showResult("파일과 출력 형식을 선택해주세요.", "error");
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+        formData.append("output_format", outputFormat);
+        formData.append("conversion_type", conversionType);
+
+        showResult("파일 변환 중...", "loading");
+
+        try {
+          const response = await fetch(`${API_BASE_URL}/converter/convert`, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (response.ok) {
+            const blob = await response.blob();
+
+            // Content-Disposition 헤더에서 파일명 추출
+            let filename = `converted.${outputFormat}`;
+            const contentDisposition = response.headers.get(
+              "Content-Disposition"
+            );
+            if (contentDisposition) {
+              const filenameMatch = contentDisposition.match(
+                /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
+              );
+              if (filenameMatch) {
+                filename = filenameMatch[1];
+              }
+            }
+
+            // 파일명 정리: 따옴표 제거 및 맨 앞뒤 언더스코어 제거
+            filename = filename.replace(/['"]/g, ""); // 따옴표 제거
+            filename = filename.replace(/^_+|_+$/g, ""); // 맨 앞과 뒤 언더스코어 제거
+
+            // 확장자가 없는 경우 추가
+            if (!filename.includes(".")) {
+              filename += `.${outputFormat}`;
+            }
+
+            // 파일 다운로드
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+            const processingTime = response.headers.get("X-Processing-Time");
+            const fileSize = response.headers.get("X-File-Size");
+
+            showResult(
+              `파일 변환 완료!\n파일명: ${filename}\n파일 크기: ${formatFileSize(
+                fileSize
+              )}\n처리 시간: ${processingTime}초`,
+              "success"
+            );
+          } else {
+            const errorData = await response.json();
+            showResult(`변환 실패: ${errorData.detail}`, "error");
+          }
+        } catch (error) {
+          showResult(`네트워크 오류: ${error.message}`, "error");
+        }
+      }
+
+      async function getConversionInfo() {
+        const fileInput = document.getElementById("file");
+        const outputFormat = document.getElementById("outputFormat").value;
+        const conversionType = document.getElementById("conversionType").value;
+
+        if (!fileInput.files[0] || !outputFormat) {
+          showResult("파일과 출력 형식을 선택해주세요.", "error");
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+        formData.append("output_format", outputFormat);
+        formData.append("conversion_type", conversionType);
+
+        showResult("변환 정보 확인 중...", "loading");
+
+        try {
+          const response = await fetch(
+            `${API_BASE_URL}/converter/convert-info`,
+            {
+              method: "POST",
+              body: formData,
+            }
+          );
+
+          const data = await response.json();
+
+          if (data.success) {
+            showResult(
+              `변환 정보:\n파일명: ${
+                data.filename
+              }\n파일 크기: ${formatFileSize(data.file_size)}\n변환 타입: ${
+                data.conversion_type
+              }\n처리 시간: ${data.processing_time.toFixed(2)}초`,
+              "success"
+            );
+          } else {
+            showResult(`정보 확인 실패: ${data.message}`, "error");
+          }
+        } catch (error) {
+          showResult(`네트워크 오류: ${error.message}`, "error");
+        }
+      }
+
+      function showResult(message, type) {
+        const resultDiv = document.getElementById("result");
+        resultDiv.textContent = message;
+        resultDiv.className = `result ${type}`;
+        resultDiv.style.display = "block";
+        resultDiv.style.whiteSpace = "pre-line";
+      }
+
+      function formatFileSize(bytes) {
+        if (!bytes) return "N/A";
+        const sizes = ["Bytes", "KB", "MB", "GB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return (
+          Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + " " + sizes[i]
+        );
+      }
+    </script>
+  </body>
+</html>

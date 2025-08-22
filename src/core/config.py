@@ -15,7 +15,7 @@ ELASTICSEARCH_SCHEME = os.getenv("ELASTICSEARCH_SCHEME", "http")
 ELASTICSEARCH_USERNAME = os.getenv("ELASTICSEARCH_USERNAME", None)
 ELASTICSEARCH_PASSWORD = os.getenv("ELASTICSEARCH_PASSWORD", None)
 INDEX_NAME = os.getenv("INDEX_NAME", "unified_rag")
-PDF_DIR = os.getenv("PDF_DIR", "pdf")
+PDF_DIR = os.getenv("PDF_DIR", "data/pdf")
 LANGCHAIN_ENDPOINT = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
 
 # Elasticsearch URL 자동 구성 (개별 설정이 있으면 우선 사용)

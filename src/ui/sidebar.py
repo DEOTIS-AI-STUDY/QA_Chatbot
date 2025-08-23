@@ -6,6 +6,7 @@ import streamlit as st
 from core.models import ModelFactory
 from core.config import LLM_MODELS, PDF_DIR
 from utils.elasticsearch import ElasticsearchManager
+from utils.elasticsearch_index import ElasticsearchIndexer
 from ui.common import show_debug_info, reset_rag_state
 
 
@@ -114,7 +115,8 @@ def _handle_pdf_upload(uploaded_files):
         embeddings = ModelFactory.create_embedding_model()
         
         # PDF 인덱싱
-        success, message = ElasticsearchManager.index_pdfs(
+        indexer = ElasticsearchIndexer()
+        success, message = indexer.index_pdfs(
             uploaded_paths, 
             embeddings, 
             st.session_state.hybrid_tracker
@@ -138,7 +140,8 @@ def _show_existing_pdfs():
             with st.spinner("기존 PDF 파일 재인덱싱 중..."):
                 from core.models import ModelFactory
                 embeddings = ModelFactory.create_embedding_model()
-                success, message = ElasticsearchManager.index_pdfs(
+                indexer = ElasticsearchIndexer()
+                success, message = indexer.index_pdfs(
                     existing_pdfs, 
                     embeddings, 
                     st.session_state.hybrid_tracker

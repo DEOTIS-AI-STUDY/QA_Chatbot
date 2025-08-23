@@ -10,7 +10,7 @@ from typing import List, Tuple
 def auto_index_files(file_types: List[str], index_name: str) -> None:
     """파일 자동 인덱싱 함수"""
     from core.models import ModelFactory
-    from utils.elasticsearch import ElasticsearchManager
+    from utils.elasticsearch_index import ElasticsearchIndexer
     from elasticsearch import Elasticsearch
     
     # 파일 타입 처리
@@ -27,7 +27,7 @@ def auto_index_files(file_types: List[str], index_name: str) -> None:
         os.makedirs(data_dir, exist_ok=True)
     
     # 각 파일 타입별 디렉토리 및 파일 확인
-    es_manager = ElasticsearchManager()
+    from utils.elasticsearch_index import ElasticsearchIndexer
     total_files = 0
     file_info = {}
     
@@ -39,13 +39,13 @@ def auto_index_files(file_types: List[str], index_name: str) -> None:
             file_info[file_type] = []
         else:
             if file_type == 'pdf':
-                files = es_manager.list_pdfs(type_dir)
+                files = ElasticsearchIndexer.list_pdfs(type_dir)
             elif file_type == 'txt':
-                files = es_manager.list_txt_files(type_dir)
+                files = ElasticsearchIndexer.list_txt_files(type_dir)
             elif file_type == 'json':
-                files = es_manager.list_json_files(type_dir)
+                files = ElasticsearchIndexer.list_json_files(type_dir)
             elif file_type == 'docx':
-                files = es_manager.list_docx_files(type_dir)
+                files = ElasticsearchIndexer.list_docx_files(type_dir)
             else:
                 files = []
             
@@ -82,7 +82,8 @@ def auto_index_files(file_types: List[str], index_name: str) -> None:
         indexing_start = time.time()
         
         # 통합 인덱싱 실행
-        success, message = es_manager.index_all_files(data_dir, embedding_model, tracker, file_types)
+        indexer = ElasticsearchIndexer()
+        success, message = indexer.index_all_files(data_dir, embedding_model, tracker, file_types)
         
         indexing_time = time.time() - indexing_start
         if success:

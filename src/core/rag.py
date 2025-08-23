@@ -322,6 +322,11 @@ def create_llm_chain(llm_model, prompt_template, input_variables=None):
     :param prompt_template: 프롬프트 템플릿
     :param input_variables: 프롬프트에 사용할 변수 리스트 (예: ["context", "question", "history"])
     :return: LLMChain 객체 또는 None
+
+    @Description: LLM + PromptTemplate을 결합하여 실행 가능한 체인 생성
+    - LLM 모델과 프롬프트를 안전하게 결합
+    - 예외 처리 포함
+    - 재사용 가능한 LLMChain 객체 반환
     """
     try:
         if input_variables is None:

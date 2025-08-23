@@ -83,6 +83,11 @@ class FastAPIRAGSystem:
         self.retriever = None
         self.llm_chain = None
         
+        # 미리 생성된 체인들 (최적화)
+        self.refinement_chain = None
+        self.qa_chain = None
+        self.summary_chain = None
+        
         # Langfuse 매니저 초기화
         self.langfuse_manager = get_langfuse_manager()
         
@@ -179,6 +184,24 @@ class FastAPIRAGSystem:
                     top_k=top_k
                 )
 
+                # 미리 사용할 체인들 생성 (최적화)
+                self.refinement_chain = create_llm_chain(
+                    self.llm_model, 
+                    prompt_for_refined_query,
+                    input_variables=["question", "context"]
+                )
+                
+                self.qa_chain = create_llm_chain(
+                    self.llm_model,
+                    prompt_for_query,
+                    input_variables=["question", "context"]
+                )
+                
+                self.summary_chain = create_llm_chain(
+                    self.llm_model,
+                    prompt_for_context_summary,
+                    input_variables=["context"]
+                )
 
                 # LLM 체인 생성
                 try:
@@ -260,17 +283,18 @@ class FastAPIRAGSystem:
                         initial_context.append(content)
                 
                 # combined_context = history + "\n\n검색된 관련 정보:\n" + "\n".join(initial_context) // 질문을 알맞게 변경하기위함이기에 history만을 context에 사용
-                refined_query = create_llm_chain(self.llm_model, prompt_for_refined_query).run({"question": query, "context": history})
+                refined_query = self.refinement_chain.run({"question": query, "context": history})
                 print(f"🔍 정제된 질의: {refined_query}")
 
-                # 정제된 질의로 최종 검색 (의미 + 키워드)
+                # 정제된 질의로 최종 검색 1단계: 의미론적 검색
                 docs_semantic = self.retriever.get_relevant_documents(refined_query)
                 print(f"🔍 의미 기반 검색 결과 개수: {len(docs_semantic)}")
 
-                # 키워드 기반 검색
+                # 정제된 질의로 최종 검색 2단계: 키워드 검색
                 keyword_results = ElasticsearchManager.keyword_search(refined_query, top_k=self.top_k)
                 print(f"🔍 키워드 기반 검색 결과 개수: {len(keyword_results)}")
 
+                # 정제된 질의로 최종 검색 3단계: 의미/키워드 결과 병합
                 # 의미/키워드 결과 병합 (중복 제거, 우선순위: 의미 기반 → 키워드 기반)
                 seen = set()
                 merged_docs = []
@@ -291,7 +315,7 @@ class FastAPIRAGSystem:
                 print(f"🔍 병합된 문서 개수: {len(merged_docs)}")
 
                 # 검색된 자료와 재정의 질문을 LLM에 넘겨서 답변 생성
-                result = create_llm_chain(self.llm_model, prompt_for_query).invoke({"question": refined_query, "context": docs_text})
+                result = self.qa_chain.invoke({"question": refined_query, "context": docs_text})
 
                 # 디버깅: 실제 응답 구조 출력
                 print(f"🔍 RAG 체인 응답 구조: {result}")
@@ -304,7 +328,7 @@ class FastAPIRAGSystem:
                     answer = result.get('answer') or result.get('result') or result.get('text')
                     print(f"🔍 최종 답변: {answer}")
                     # 답변 요약
-                    answer_summary = create_llm_chain(self.llm_model, prompt_for_context_summary).run({"context": answer})
+                    answer_summary = self.summary_chain.run({"context": answer})
                     print(f"🔍 답변 요약: {answer_summary}")
                     # 대화 기록에 질문과 답변 추가
                     chat_manager.add_chat(refined_query, answer_summary)

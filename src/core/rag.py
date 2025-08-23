@@ -2,10 +2,12 @@
 RAG 시스템 핵심 로직
 """
 import os
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 from langchain.chains import RetrievalQA, LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import ElasticsearchStore
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import Document
 from core.config import ELASTICSEARCH_URL, INDEX_NAME
 from utils.elasticsearch import ElasticsearchManager
 
@@ -146,16 +148,70 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3, callbacks=None) -> T
             error_traceback = traceback.format_exc()
             return None, f"벡터스토어 생성 실패 - 예상치 못한 오류:\n예외 타입: {type(vs_error).__name__}\n오류 메시지: {str(vs_error)}\nElasticsearch URL: {ELASTICSEARCH_URL}\n스택 트레이스:\n{error_traceback}"
         
-        # 리트리버 설정 - 상세한 예외 처리
+        # 리트리버 설정 - 하이브리드 검색으로 품질 향상
         try:
             print("🔄 리트리버 설정 중...")
-            retriever = vectorstore.as_retriever(
+            
+            # 기본 시맨틱 검색 + 키워드 검색 조합
+            base_retriever = vectorstore.as_retriever(
                 search_kwargs={
-                    "k": top_k,
-                    "fetch_k": min(top_k * 3, 10000)
+                    "k": top_k * 2,  # 더 많은 후보 문서 확보
+                    "fetch_k": min(top_k * 6, 10000)  # 초기 검색 범위 확대
                 }
             )
-            print(f"✅ 리트리버 설정 완료 (top_k: {top_k})")
+            
+            # 하이브리드 검색을 위한 키워드 검색 연결
+            
+            # 리랭킹을 위한 컨텍스트 기반 필터링 추가
+            def enhanced_retrieve(query):
+                # 1차: 기본 시맨틱 검색
+                semantic_docs = base_retriever.get_relevant_documents(query)
+                
+                # 2차: 키워드 검색으로 보완
+                keyword_results = ElasticsearchManager.keyword_search(query, top_k * 2)
+                
+                # 3차: 키워드 매칭 강화
+                query_keywords = query.lower().split()
+                scored_docs = []
+                
+                for doc in semantic_docs:
+                    content = doc.page_content.lower()
+                    keyword_score = sum(1 for keyword in query_keywords if keyword in content)
+                    metadata_score = 0
+                    
+                    # 메타데이터 기반 스코어링
+                    if hasattr(doc, 'metadata'):
+                        if doc.metadata.get('structure_type') == '업무안내서' and '업무' in query:
+                            metadata_score += 2
+                        if doc.metadata.get('has_tables') and ('표' in query or '목록' in query):
+                            metadata_score += 1
+                        if doc.metadata.get('category') == 'DOCX' and ('안내' in query or '절차' in query):
+                            metadata_score += 1.5
+                    
+                    # 키워드 검색 결과와 매칭되면 보너스 점수
+                    filename = doc.metadata.get('filename', '')
+                    for kw_result in keyword_results:
+                        if kw_result.get('metadata', {}).get('filename') == filename:
+                            metadata_score += 1
+                            break
+                    
+                    total_score = keyword_score + metadata_score
+                    scored_docs.append((doc, total_score))
+                
+                # 스코어 기반 정렬 후 상위 k개 반환
+                scored_docs.sort(key=lambda x: x[1], reverse=True)
+                return [doc for doc, _ in scored_docs[:top_k]]
+            
+            # 커스텀 리트리버 클래스 생성
+            class EnhancedRetriever(BaseRetriever):
+                def _get_relevant_documents(self, query: str, *, run_manager=None):
+                    return enhanced_retrieve(query)
+                
+                def get_relevant_documents(self, query):
+                    return enhanced_retrieve(query)
+            
+            retriever = EnhancedRetriever()
+            print(f"✅ 향상된 하이브리드 리트리버 설정 완료 (시맨틱 + 키워드 검색, top_k: {top_k})")
         except AttributeError as attr_error:
             return None, f"리트리버 설정 실패 - 속성 오류: {str(attr_error)}\n벡터스토어 객체가 올바르지 않을 수 있습니다."
         except ValueError as value_error:
@@ -362,7 +418,6 @@ def create_retriever(embedding_model, top_k=3):
     try:
         from core.config import ELASTICSEARCH_URL, INDEX_NAME
         from langchain_community.vectorstores import ElasticsearchStore
-        from utils.elasticsearch import ElasticsearchManager
         es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
         if not success:
             print(f"❌ Elasticsearch 연결 실패: {message}")

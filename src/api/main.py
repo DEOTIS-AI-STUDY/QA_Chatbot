@@ -36,6 +36,7 @@ from config.app_config import (
     LLM_MODELS,
     HUGGINGFACE_EMBEDDINGS_AVAILABLE
 )
+from core.config import INDEX_NAME
 from utils.file_utils import auto_index_files
 
 # 라우트 모듈 import
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     # 파일 자동 인덱싱 실행 (import된 함수 사용)
     if args.init_index:
         print("🚀 파일 자동 인덱싱을 실행합니다...")
-        auto_index_files()
+        auto_index_files(args.file_types, INDEX_NAME)
         print("✅ 파일 자동 인덱싱이 완료되었습니다.")
         exit(0)
     

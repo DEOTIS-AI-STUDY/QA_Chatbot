@@ -94,7 +94,9 @@ def override_get_rag_system():
 
 # 의존성 함수 오버라이드
 import routes.endpoint
+import routes.endpoint_langfuse
 routes.endpoint.get_rag_system = override_get_rag_system
+routes.endpoint_langfuse.get_rag_system = override_get_rag_system
 
 # 엔드포인트 생성
 create_endpoints(app, current_api_dir)

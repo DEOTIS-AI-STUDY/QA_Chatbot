@@ -8,6 +8,24 @@ from typing import List, Tuple, Optional, Dict, Any
 from elasticsearch import Elasticsearch
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+def get_optimized_text_splitter():
+    """한국어 QA 최적화된 텍스트 분할기 반환
+    
+    Returns:
+        RecursiveCharacterTextSplitter: 한국어에 최적화된 설정의 텍스트 분할기
+        
+    Features:
+        - chunk_size: 800 (한국어는 더 작은 청크가 효과적)
+        - chunk_overlap: 160 (20% 오버랩으로 문맥 연결성 향상)
+        - separators: 한국어 문장 구분자 추가
+    """
+    return RecursiveCharacterTextSplitter(
+        chunk_size=800,  # 한국어는 더 작은 청크가 효과적
+        chunk_overlap=160,  # 20% 오버랩으로 문맥 연결성 향상
+        separators=["\n\n", "\n", ".", "!", "?", "。", "！", "？", " ", ""],  # 한국어 문장 구분자 추가
+        length_function=len
+    )
 from langchain_community.vectorstores import ElasticsearchStore
 from langchain.schema import Document
 from docx import Document as DocxDocument
@@ -310,11 +328,8 @@ class ElasticsearchManager:
             loader = PyPDFLoader(pdf_path)
             docs = loader.load()
             
-            # 텍스트 분할
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000, 
-                chunk_overlap=200
-            )
+            # 텍스트 분할 - 한국어 최적화
+            splitter = get_optimized_text_splitter()
             chunks = splitter.split_documents(docs)
             
             # 메타데이터 보강
@@ -390,11 +405,8 @@ class ElasticsearchManager:
                 loader = TextLoader(txt_path, encoding='utf-8')
                 docs = loader.load()
                 
-                # 텍스트 분할
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=1000, 
-                    chunk_overlap=200
-                )
+                # 텍스트 분할 - 한국어 최적화
+                splitter = get_optimized_text_splitter()
                 chunks = splitter.split_documents(docs)
                 
                 # 메타데이터 보강
@@ -489,11 +501,8 @@ class ElasticsearchManager:
                         }
                     )
                     
-                    # 텍스트 분할
-                    splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=1000, 
-                        chunk_overlap=200
-                    )
+                    # 텍스트 분할 - 한국어 최적화
+                    splitter = get_optimized_text_splitter()
                     chunks = splitter.split_documents([doc])
                     
                     all_documents.extend(chunks)
@@ -590,11 +599,8 @@ class ElasticsearchManager:
                         }
                     )
                     
-                    # 텍스트 분할
-                    splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=1000, 
-                        chunk_overlap=200
-                    )
+                    # 텍스트 분할 - 한국어 최적화
+                    splitter = get_optimized_text_splitter()
                     chunks = splitter.split_documents([langchain_doc])
                     
                     # 메타데이터 보강
@@ -710,7 +716,7 @@ class ElasticsearchManager:
                     loader = PyPDFLoader(pdf_path)
                     docs = loader.load()
                     
-                    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                    splitter = get_optimized_text_splitter()
                     chunks = splitter.split_documents(docs)
                     
                     for chunk in chunks:
@@ -736,7 +742,7 @@ class ElasticsearchManager:
                     loader = TextLoader(txt_path, encoding='utf-8')
                     docs = loader.load()
                     
-                    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                    splitter = get_optimized_text_splitter()
                     chunks = splitter.split_documents(docs)
                     
                     for chunk in chunks:
@@ -774,7 +780,7 @@ class ElasticsearchManager:
                             }
                         )
                         
-                        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                        splitter = get_optimized_text_splitter()
                         chunks = splitter.split_documents([doc])
                         
                         all_documents.extend(chunks)
@@ -804,7 +810,7 @@ class ElasticsearchManager:
                             "category": "DOCX"
                         }
                     )
-                    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                    splitter = get_optimized_text_splitter()
                     chunks = splitter.split_documents([doc])
                     all_documents.extend(chunks)
 

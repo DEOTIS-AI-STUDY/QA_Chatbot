@@ -162,7 +162,7 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3, callbacks=None) -> T
             
             # 하이브리드 검색을 위한 키워드 검색 연결
             
-            # 리랭킹을 위한 컨텍스트 기반 필터링 추가
+            # 리랭킹을 위한 컨텍스트 기반 필터링 추가 (할루시네이션 방지 강화)
             def enhanced_retrieve(query):
                 # 1차: 기본 시맨틱 검색
                 semantic_docs = base_retriever.get_relevant_documents(query)
@@ -170,13 +170,22 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3, callbacks=None) -> T
                 # 2차: 키워드 검색으로 보완
                 keyword_results = ElasticsearchManager.keyword_search(query, top_k * 2)
                 
-                # 3차: 키워드 매칭 강화
+                # 3차: 관련성 검증 및 키워드 매칭 강화
                 query_keywords = query.lower().split()
                 scored_docs = []
                 
                 for doc in semantic_docs:
                     content = doc.page_content.lower()
+                    
+                    # 기본 키워드 매칭 점수
                     keyword_score = sum(1 for keyword in query_keywords if keyword in content)
+                    
+                    # 관련성 임계값 설정 (할루시네이션 방지)
+                    min_relevance_score = 0.1  # 최소 관련성 점수
+                    if keyword_score == 0 and len(doc.page_content) < 50:
+                        # 키워드 매칭이 전혀 없고 내용이 너무 짧으면 제외
+                        continue
+                    
                     metadata_score = 0
                     
                     # 메타데이터 기반 스코어링
@@ -196,11 +205,20 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3, callbacks=None) -> T
                             break
                     
                     total_score = keyword_score + metadata_score
-                    scored_docs.append((doc, total_score))
+                    
+                    # 최소 점수 이상인 문서만 포함 (할루시네이션 방지)
+                    if total_score >= min_relevance_score:
+                        scored_docs.append((doc, total_score))
                 
                 # 스코어 기반 정렬 후 상위 k개 반환
                 scored_docs.sort(key=lambda x: x[1], reverse=True)
-                return [doc for doc, _ in scored_docs[:top_k]]
+                final_docs = [doc for doc, _ in scored_docs[:top_k]]
+                
+                # 빈 결과 처리 (할루시네이션 방지)
+                if not final_docs:
+                    print("⚠️ 관련성 있는 문서를 찾을 수 없습니다.")
+                
+                return final_docs
             
             # 커스텀 리트리버 클래스 생성
             class EnhancedRetriever(BaseRetriever):
@@ -219,18 +237,23 @@ def create_rag_chain(embeddings, llm_model, top_k: int = 3, callbacks=None) -> T
         except Exception as ret_error:
             return None, f"리트리버 설정 실패 - 예상치 못한 오류: {str(ret_error)}"
         
-        # 프롬프트 템플릿 - 상세한 예외 처리
+        # 프롬프트 템플릿 - 할루시네이션 방지 강화
         prompt_template = """
-다음 문서 내용을 바탕으로 질문에 답변해주세요.
-문서에서 답을 찾을 수 없다면 "문서에 관련 내용이 없습니다"라고 답변하세요.
-답변은 친절하고 자세하게 해주세요.
+당신은 제공된 문서만을 기반으로 답변하는 AI 어시스턴트입니다.
 
-문서 내용:
+**중요한 규칙:**
+1. 반드시 아래 제공된 문서 내용만을 사용하여 답변하세요
+2. 문서에 없는 내용은 절대 추가하지 마세요
+3. 확실하지 않은 내용은 "문서에서 확인할 수 없습니다"라고 명시하세요
+4. 답변할 수 없는 질문이면 "제공된 문서에 관련 내용이 없어 답변할 수 없습니다"라고 답변하세요
+5. 답변은 친절하게 자세하게 해주세요
+
+**제공된 문서 내용:**
 {context}
 
-질문: {question}
+**질문:** {question}
 
-답변:
+**답변 (문서 내용만 기반):**
 """
         
         try:

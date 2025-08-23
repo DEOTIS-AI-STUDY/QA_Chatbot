@@ -8,6 +8,19 @@ from typing import List, Tuple, Optional, Dict, Any
 from elasticsearch import Elasticsearch
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import ElasticsearchStore
+from langchain.schema import Document
+from docx import Document as DocxDocument
+from core.config import (
+    ELASTICSEARCH_URL, 
+    ELASTICSEARCH_HOST, 
+    ELASTICSEARCH_PORT, 
+    ELASTICSEARCH_SCHEME,
+    ELASTICSEARCH_USERNAME,
+    ELASTICSEARCH_PASSWORD,
+    INDEX_NAME
+)
+
 
 def get_optimized_text_splitter():
     """한국어 QA 최적화된 텍스트 분할기 반환
@@ -26,21 +39,11 @@ def get_optimized_text_splitter():
         separators=["\n\n", "\n", ".", "!", "?", "。", "！", "？", " ", ""],  # 한국어 문장 구분자 추가
         length_function=len
     )
-from langchain_community.vectorstores import ElasticsearchStore
-from langchain.schema import Document
-from docx import Document as DocxDocument
-from core.config import (
-    ELASTICSEARCH_URL, 
-    ELASTICSEARCH_HOST, 
-    ELASTICSEARCH_PORT, 
-    ELASTICSEARCH_SCHEME,
-    ELASTICSEARCH_USERNAME,
-    ELASTICSEARCH_PASSWORD,
-    INDEX_NAME
-)
 
 
 class ElasticsearchManager:
+    """Elasticsearch 관리 클래스"""
+    
     @staticmethod
     def keyword_search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """키워드(단순 텍스트) 기반 검색"""
@@ -73,7 +76,6 @@ class ElasticsearchManager:
         except Exception as e:
             print(f"[ElasticsearchManager] 키워드 검색 오류: {e}")
             return []
-    """Elasticsearch 관리 클래스"""
     
     @staticmethod
     def get_connection_config() -> Dict[str, Any]:

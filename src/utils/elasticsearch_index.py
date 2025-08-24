@@ -3,6 +3,7 @@ Elasticsearch 인덱싱 전용 유틸리티
 """
 import os
 import json
+import re
 from typing import List, Tuple, Any
 from elasticsearch import Elasticsearch
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
@@ -428,11 +429,20 @@ class ElasticsearchIndexer:
                     splitter = get_optimized_text_splitter()
                     
                     for doc in docs:
-                        doc.metadata.update({
+                        # 기본 메타데이터 설정
+                        base_metadata = {
                             "source": file_path,
-                            "filename": os.path.basename(file_path),
-                            "category": file_type.upper()
-                        })
+                            "filename": os.path.basename(file_path)
+                        }
+                        
+                        # JSON 파일의 경우 기존 카테고리 정보 보존
+                        if file_type.lower() == 'json' and 'category' in doc.metadata:
+                            base_metadata["file_type"] = file_type.upper()
+                            # 기존 category는 유지
+                        else:
+                            base_metadata["category"] = file_type.upper()
+                        
+                        doc.metadata.update(base_metadata)
                         
                         # 표가 아닌 경우만 분할
                         if "표" not in doc.page_content:

@@ -7,7 +7,7 @@ import time
 from typing import List, Tuple
 
 
-def auto_index_files(file_types: List[str], index_name: str) -> None:
+def auto_index_files(file_types: List[str], index_name: str, clear_existing: bool = False) -> None:
     """파일 자동 인덱싱 함수"""
     from core.models import ModelFactory
     from utils.elasticsearch_index import ElasticsearchIndexer
@@ -19,6 +19,25 @@ def auto_index_files(file_types: List[str], index_name: str) -> None:
     
     print(f"\n📁 파일 자동 인덱싱 시작 (INDEX_NAME: {index_name})")
     print(f"📋 대상 파일 타입: {', '.join(file_types)}")
+    if clear_existing:
+        print("🗑️  기존 인덱스 데이터 삭제 모드 활성화")
+    
+    # 기존 인덱스 삭제 (clear_existing이 True인 경우)
+    if clear_existing:
+        try:
+            es = Elasticsearch(os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"), timeout=10)
+            if es.indices.exists(index=index_name):
+                doc_count = es.count(index=index_name).get("count", 0)
+                if doc_count > 0:
+                    print(f"🗑️  기존 인덱스에서 {doc_count}개 문서를 삭제합니다...")
+                    es.indices.delete(index=index_name)
+                    print("✅ 기존 인덱스 삭제 완료")
+                else:
+                    print("📭 기존 인덱스가 비어있습니다.")
+            else:
+                print("📭 기존 인덱스가 없습니다.")
+        except Exception as delete_error:
+            print(f"⚠️ 인덱스 삭제 중 오류: {str(delete_error)}, 인덱싱을 계속 진행합니다...")
     
     # data 디렉토리 확인 및 생성
     data_dir = "data"
@@ -56,17 +75,18 @@ def auto_index_files(file_types: List[str], index_name: str) -> None:
                 print(f"  - {os.path.basename(file_path)}")
     
     if total_files == 0:
-        print("📄 인덱싱할 파일이 없습니다. 기존 문서 삭제를 진행합니다.")
+        print("📄 인덱싱할 파일이 없습니다.")
     
-    # 기존 인덱스 확인
-    try:
-        es = Elasticsearch(os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"), timeout=10)
-        if es.indices.exists(index=index_name):
-            doc_count = es.count(index=index_name).get("count", 0)
-            if doc_count > 0:
-                print(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다. 기존 인덱스를 삭제하고 새로 생성합니다.")
-    except Exception as check_error:
-        print(f"⚠️ 인덱스 확인 중 오류: {str(check_error)}, 인덱싱을 계속 진행합니다...")
+    # 기존 인덱스 확인 (clear_existing이 False인 경우에만)
+    if not clear_existing:
+        try:
+            es = Elasticsearch(os.getenv("ELASTICSEARCH_URL", "http://localhost:9200"), timeout=10)
+            if es.indices.exists(index=index_name):
+                doc_count = es.count(index=index_name).get("count", 0)
+                if doc_count > 0:
+                    print(f"📚 기존 인덱스에 {doc_count}개 문서가 있습니다. 새 문서를 추가합니다.")
+        except Exception as check_error:
+            print(f"⚠️ 인덱스 확인 중 오류: {str(check_error)}, 인덱싱을 계속 진행합니다...")
     
     print(f"📄 총 {total_files}개 파일을 자동 인덱싱합니다...")
     

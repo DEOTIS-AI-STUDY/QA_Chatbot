@@ -469,13 +469,223 @@ class ElasticsearchIndexer:
     
     @staticmethod
     def _process_json_file(path: str) -> List[Document]:
-        """JSON 파일 처리"""
+        """JSON 파일 처리 - 검색 최적화를 위한 세분화된 문서 분할"""
         with open(path, 'r', encoding='utf-8') as f:
             json_data = json.load(f)
-        text_content = ElasticsearchIndexer._extract_text_from_json(json_data)
-        if text_content:
-            return [Document(page_content=text_content, metadata={})]
-        return []
+        
+        documents = []
+        
+        # converted_index.json 형태의 구조화된 JSON인지 확인
+        if isinstance(json_data, list) and len(json_data) > 0:
+            for file_entry in json_data:
+                if isinstance(file_entry, dict) and 'filename' in file_entry and 'data' in file_entry:
+                    # 구조화된 JSON 처리
+                    filename = file_entry.get('filename', 'unknown')
+                    data_items = file_entry.get('data', [])
+                    
+                    # 검색 최적화를 위한 다층 구조 처리
+                    for item in data_items:
+                        if isinstance(item, dict) and item.get('content', '').strip():
+                            # 각 항목을 개별 문서로 생성 (최대한 세분화)
+                            title = item.get('title', '').strip()
+                            heading = item.get('heading', '').strip()
+                            section = item.get('section', '').strip()
+                            content = item.get('content', '').strip()
+                            
+                            if not content:
+                                continue
+                            
+                            # 메타데이터 구성
+                            metadata = {
+                                'source_filename': filename,
+                                'document_type': 'structured_json',
+                                'title': title if title else '기타',
+                                'heading': heading if heading else '',
+                                'section': section if section else '',
+                                'category': ElasticsearchIndexer._extract_category(title, heading),
+                                'topic': ElasticsearchIndexer._extract_topic(title, heading, section),
+                                'content_type': ElasticsearchIndexer._classify_content_type(content)
+                            }
+                            
+                            # 검색 친화적 문서 내용 구성
+                            document_parts = []
+                            
+                            # 제목 계층 구조 추가
+                            if title:
+                                document_parts.append(f"대분류: {title}")
+                            if heading:
+                                document_parts.append(f"소분류: {heading}")
+                            if section:
+                                document_parts.append(f"세부항목: {section}")
+                            
+                            # 핵심 키워드 추출 및 추가
+                            keywords = ElasticsearchIndexer._extract_keywords(content)
+                            if keywords:
+                                document_parts.append(f"주요 키워드: {', '.join(keywords)}")
+                            
+                            # 원본 내용
+                            document_parts.append(f"내용: {content}")
+                            
+                            # 검색용 요약 생성
+                            summary = ElasticsearchIndexer._generate_summary(content, title, heading, section)
+                            if summary:
+                                document_parts.append(f"요약: {summary}")
+                            
+                            document_content = '\n\n'.join(document_parts)
+                            documents.append(Document(page_content=document_content, metadata=metadata))
+                    
+                    # 대분류별 통합 문서도 생성 (상위 레벨 검색용)
+                    title_groups = {}
+                    for item in data_items:
+                        if isinstance(item, dict):
+                            title = item.get('title', '').strip()
+                            if title and item.get('content', '').strip():
+                                if title not in title_groups:
+                                    title_groups[title] = []
+                                title_groups[title].append(item)
+                    
+                    for title, items in title_groups.items():
+                        if len(items) > 1:  # 여러 항목이 있는 경우만 통합 문서 생성
+                            content_parts = []
+                            all_keywords = set()
+                            
+                            for item in items:
+                                content = item.get('content', '').strip()
+                                if content:
+                                    heading = item.get('heading', '').strip()
+                                    section = item.get('section', '').strip()
+                                    
+                                    part_header = []
+                                    if heading:
+                                        part_header.append(heading)
+                                    if section:
+                                        part_header.append(section)
+                                    
+                                    if part_header:
+                                        content_parts.append(f"[{' - '.join(part_header)}]\n{content}")
+                                    else:
+                                        content_parts.append(content)
+                                    
+                                    # 키워드 수집
+                                    keywords = ElasticsearchIndexer._extract_keywords(content)
+                                    all_keywords.update(keywords)
+                            
+                            if content_parts:
+                                consolidated_content = '\n\n'.join(content_parts)
+                                metadata = {
+                                    'source_filename': filename,
+                                    'document_type': 'consolidated_json',
+                                    'title': title,
+                                    'category': ElasticsearchIndexer._extract_category(title, ''),
+                                    'keywords': ', '.join(sorted(all_keywords)),
+                                    'item_count': len(items)
+                                }
+                                
+                                document_content = f"대분류: {title}\n\n주요 키워드: {', '.join(sorted(all_keywords))}\n\n통합 내용:\n{consolidated_content}"
+                                documents.append(Document(page_content=document_content, metadata=metadata))
+                else:
+                    # 일반 JSON 처리 (기존 방식)
+                    text_content = ElasticsearchIndexer._extract_text_from_json(file_entry)
+                    if text_content:
+                        documents.append(Document(page_content=text_content, metadata={}))
+        else:
+            # 일반 JSON 처리 (기존 방식)
+            text_content = ElasticsearchIndexer._extract_text_from_json(json_data)
+            if text_content:
+                documents.append(Document(page_content=text_content, metadata={}))
+        
+        return documents
+    
+    @staticmethod
+    def _extract_category(title: str, heading: str) -> str:
+        """대분류 카테고리 추출"""
+        text = f"{title} {heading}".lower()
+        
+        if '기본업무' in text or '절차' in text:
+            return '업무절차'
+        elif '소비자' in text or '가이드' in text:
+            return '이용가이드'
+        elif '발급' in text:
+            return '카드발급'
+        elif '이용한도' in text:
+            return '이용한도'
+        elif '연체' in text or '추심' in text:
+            return '연체관리'
+        elif '부가서비스' in text:
+            return '부가서비스'
+        else:
+            return '기타'
+    
+    @staticmethod
+    def _extract_topic(title: str, heading: str, section: str) -> str:
+        """세부 주제 추출"""
+        parts = [p for p in [title, heading, section] if p.strip()]
+        return ' - '.join(parts) if parts else '기타'
+    
+    @staticmethod
+    def _classify_content_type(content: str) -> str:
+        """내용 유형 분류"""
+        content_lower = content.lower()
+        
+        if '절차' in content_lower or '단계' in content_lower:
+            return '절차안내'
+        elif '기준' in content_lower or '조건' in content_lower:
+            return '기준정보'
+        elif '방법' in content_lower or '활용' in content_lower:
+            return '이용방법'
+        elif '구분' in content_lower or '종류' in content_lower:
+            return '분류정보'
+        elif '주의' in content_lower or '금지' in content_lower:
+            return '주의사항'
+        else:
+            return '일반정보'
+    
+    @staticmethod
+    def _extract_keywords(content: str) -> List[str]:
+        """내용에서 주요 키워드 추출"""
+        import re
+        
+        # 금융 관련 주요 키워드 패턴
+        keyword_patterns = [
+            r'신용카드|체크카드|직불카드|선불카드',
+            r'카드발급|발급기준|발급절차',
+            r'이용한도|결제능력|신용등급',
+            r'연체|추심|법적조치',
+            r'부가서비스|포인트|할부',
+            r'연회비|수수료|이자',
+            r'가족카드|법인카드|복지카드',
+            r'VISA|Master|AMEX|JCB',
+            r'가처분소득|신용평점|연체정보'
+        ]
+        
+        keywords = []
+        for pattern in keyword_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            keywords.extend(matches)
+        
+        # 중요한 숫자나 비율 정보
+        number_patterns = re.findall(r'\d+(?:\.\d+)?%|\d+만원|\d+개월|\d+일', content)
+        keywords.extend(number_patterns)
+        
+        # 중복 제거 및 정렬
+        return sorted(list(set(keywords)))
+    
+    @staticmethod
+    def _generate_summary(content: str, title: str, heading: str, section: str) -> str:
+        """내용 요약 생성"""
+        # 첫 문장이나 핵심 문장 추출
+        sentences = content.split('.')
+        if sentences:
+            first_sentence = sentences[0].strip()
+            if len(first_sentence) > 10 and len(first_sentence) < 200:
+                return first_sentence
+        
+        # 제목 정보 기반 요약
+        context_parts = [p for p in [title, heading, section] if p.strip()]
+        if context_parts:
+            return f"{' - '.join(context_parts)}에 대한 정보"
+        
+        return ""
     
     @staticmethod
     def _process_docx_file(path: str) -> List[Document]:

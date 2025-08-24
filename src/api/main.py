@@ -127,12 +127,18 @@ if __name__ == "__main__":
     parser.add_argument("--file-types", nargs='+', default=['pdf'], 
                        choices=['pdf', 'txt', 'json', 'docx', 'all'], 
                        help="인덱싱할 파일 타입 선택 (기본값: pdf)")
+    parser.add_argument("--only", action="store_true", 
+                       help="기존 인덱스 데이터를 모두 삭제하고 지정된 파일 타입만 인덱싱")
     args = parser.parse_args()
 
     # 파일 자동 인덱싱 실행 (import된 함수 사용)
     if args.init_index:
         print("🚀 파일 자동 인덱싱을 실행합니다...")
-        auto_index_files(args.file_types, INDEX_NAME)
+        if args.only:
+            print("🗑️  --only 옵션: 기존 인덱스 데이터를 모두 삭제하고 새로 인덱싱합니다...")
+            auto_index_files(args.file_types, INDEX_NAME, clear_existing=True)
+        else:
+            auto_index_files(args.file_types, INDEX_NAME, clear_existing=False)
         print("✅ 파일 자동 인덱싱이 완료되었습니다.")
         exit(0)
     

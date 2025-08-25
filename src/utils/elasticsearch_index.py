@@ -505,7 +505,10 @@ class ElasticsearchIndexer:
                             if not content:
                                 continue
                             
-                            # 메타데이터 구성
+                            # 키워드 추출 (메타데이터에서 활용)
+                            keywords = ElasticsearchIndexer._extract_keywords(content)
+                            
+                            # 메타데이터 구성 - 검색 최적화를 위한 풍부한 정보
                             metadata = {
                                 'source_filename': filename,
                                 'document_type': 'structured_json',
@@ -515,24 +518,44 @@ class ElasticsearchIndexer:
                                 'category': ElasticsearchIndexer._extract_category(title, heading),
                                 'topic': ElasticsearchIndexer._extract_topic(title, heading, section),
                                 'content_type': ElasticsearchIndexer._classify_content_type(content),
-                                'has_table': item.get('hasTable', False)  # hasTable 속성 추가
+                                'has_table': item.get('hasTable', False),
+                                'keywords': ', '.join(keywords) if keywords else '',  # 검색용 키워드 문자열
+                                'keyword_count': len(keywords),  # 키워드 개수
+                                'content_length': len(content),  # 내용 길이
+                                'hierarchy_depth': len([x for x in [title, heading, section] if x.strip()]),  # 계층 깊이
+                                'title_clean': title.strip('[]') if title else '',  # 대괄호 제거한 제목
+                                'is_procedure': '절차' in content or '단계' in content,  # 절차 문서 여부
+                                'has_numbers': bool(re.search(r'\d+', content)),  # 숫자 포함 여부
+                                'urgency_level': 'high' if any(word in content.lower() for word in ['긴급', '즉시', '주의', '경고']) else 'normal'  # 긴급도
                             }
                             
-                            # 검색 친화적 문서 내용 구성
+                            # 검색 친화적 문서 내용 구성 - 메타데이터 활용
                             document_parts = []
                             
-                            # 제목 계층 구조 추가
+                            # 제목 계층 구조 추가 (검색 가중치 향상)
                             if title:
                                 document_parts.append(f"대분류: {title}")
+                                document_parts.append(f"카테고리: {title.strip('[]')}")  # 대괄호 제거한 버전
                             if heading:
                                 document_parts.append(f"소분류: {heading}")
                             if section:
                                 document_parts.append(f"세부항목: {section}")
                             
-                            # 핵심 키워드 추출 및 추가
-                            keywords = ElasticsearchIndexer._extract_keywords(content)
+                            # 키워드 강화 (검색 정확도 향상)
                             if keywords:
                                 document_parts.append(f"주요 키워드: {', '.join(keywords)}")
+                                document_parts.append(f"검색어: {' '.join(keywords)}")  # 키워드 반복으로 검색 강화
+                            
+                            # 문서 특성 표시
+                            doc_features = []
+                            if item.get('hasTable', False):
+                                doc_features.extend(["표 포함", "데이터표", "표형태정보"])
+                            if metadata['is_procedure']:
+                                doc_features.extend(["절차안내", "단계별가이드"])
+                            if metadata['has_numbers']:
+                                doc_features.extend(["수치정보", "정량데이터"])
+                            if doc_features:
+                                document_parts.append(f"문서특성: {', '.join(doc_features)}")
                             
                             # 원본 내용
                             document_parts.append(f"내용: {content}")
@@ -583,22 +606,38 @@ class ElasticsearchIndexer:
                                         content_parts.append(content)
                                     
                                     # 키워드 수집
-                                    keywords = ElasticsearchIndexer._extract_keywords(content)
-                                    all_keywords.update(keywords)
+                                    item_keywords = ElasticsearchIndexer._extract_keywords(content)
+                                    all_keywords.update(item_keywords)
                             
                             if content_parts:
                                 consolidated_content = '\n\n'.join(content_parts)
+                                
+                                # 통합 문서의 풍부한 메타데이터
                                 metadata = {
                                     'source_filename': filename,
                                     'document_type': 'consolidated_json',
                                     'title': title,
+                                    'title_clean': title.strip('[]'),
                                     'category': ElasticsearchIndexer._extract_category(title, ''),
                                     'keywords': ', '.join(sorted(all_keywords)),
+                                    'keyword_count': len(all_keywords),
                                     'item_count': len(items),
-                                    'has_table': has_any_table  # 통합 문서의 표 포함 여부
+                                    'has_table': has_any_table,
+                                    'content_length': len(consolidated_content),
+                                    'is_comprehensive': len(items) > 3,  # 포괄적 문서 여부
+                                    'urgency_level': 'high' if any('긴급' in str(item.get('content', '')) for item in items) else 'normal'
                                 }
                                 
-                                document_content = f"대분류: {title}\n\n주요 키워드: {', '.join(sorted(all_keywords))}\n\n통합 내용:\n{consolidated_content}"
+                                # 통합 문서 내용 구성 (검색 최적화)
+                                doc_content_parts = [
+                                    f"대분류: {title}",
+                                    f"카테고리: {title.strip('[]')}",
+                                    f"주요 키워드: {', '.join(sorted(all_keywords))}",
+                                    f"문서특성: {'표포함 ' if has_any_table else ''}포괄적문서 총{len(items)}개항목",
+                                    f"통합 내용:\n{consolidated_content}"
+                                ]
+                                
+                                document_content = '\n\n'.join(doc_content_parts)
                                 documents.append(Document(page_content=document_content, metadata=metadata))
                 else:
                     # 일반 JSON 처리 (기존 방식)
@@ -615,22 +654,36 @@ class ElasticsearchIndexer:
     
     @staticmethod
     def _extract_category(title: str, heading: str) -> str:
-        """대분류 카테고리 추출"""
+        """대분류 카테고리 추출 - 개선된 버전"""
         text = f"{title} {heading}".lower()
         
-        if '기본업무' in text or '절차' in text:
+        # 더 정확한 카테고리 분류
+        if '기본업무' in text or '처리' in text or '절차' in text:
             return '업무절차'
-        elif '소비자' in text or '가이드' in text:
+        elif '소비자' in text or '가이드' in text or '종류' in text:
             return '이용가이드'
-        elif '발급' in text:
+        elif '발급' in text or '신청' in text:
             return '카드발급'
-        elif '이용한도' in text:
+        elif '이용한도' in text or '한도' in text:
             return '이용한도'
-        elif '연체' in text or '추심' in text:
+        elif '연체' in text or '추심' in text or '법적조치' in text:
             return '연체관리'
-        elif '부가서비스' in text:
+        elif '부가서비스' in text or '혜택' in text or '포인트' in text:
             return '부가서비스'
+        elif '수수료' in text or '연회비' in text or '요금' in text:
+            return '수수료정보'
+        elif '보안' in text or '분실' in text or '도난' in text:
+            return '보안관리'
+        elif '해외' in text or '국외' in text:
+            return '해외이용'
+        elif '현금서비스' in text or '대출' in text or '카드론' in text:
+            return '대출서비스'
         else:
+            # title에서 카테고리 추출 시도 (대괄호 제거)
+            if '[' in title and ']' in title:
+                category_match = title.strip('[]').strip()
+                if category_match and len(category_match) < 20:
+                    return category_match
             return '기타'
     
     @staticmethod
@@ -659,33 +712,50 @@ class ElasticsearchIndexer:
     
     @staticmethod
     def _extract_keywords(content: str) -> List[str]:
-        """내용에서 주요 키워드 추출"""
+        """내용에서 주요 키워드 추출 - 개선된 버전"""
         import re
         
-        # 금융 관련 주요 키워드 패턴
+        # 금융 관련 주요 키워드 패턴 (더 포괄적)
         keyword_patterns = [
-            r'신용카드|체크카드|직불카드|선불카드',
-            r'카드발급|발급기준|발급절차',
-            r'이용한도|결제능력|신용등급',
-            r'연체|추심|법적조치',
-            r'부가서비스|포인트|할부',
-            r'연회비|수수료|이자',
-            r'가족카드|법인카드|복지카드',
-            r'VISA|Master|AMEX|JCB',
-            r'가처분소득|신용평점|연체정보'
+            r'신용카드|체크카드|직불카드|선불카드|가족카드|법인카드',
+            r'카드발급|발급기준|발급절차|발급조건|발급신청',
+            r'이용한도|결제능력|신용등급|신용평점|신용도',
+            r'연체|추심|법적조치|연체정보|채권추심',
+            r'부가서비스|포인트|할부|적립|혜택|리워드',
+            r'연회비|수수료|이자|요금|비용|대금',
+            r'VISA|Master|AMEX|JCB|BC카드',
+            r'가처분소득|금융거래|신용정보|개인신용평가',
+            r'현금서비스|카드론|대출|여신|한도',
+            r'분실|도난|재발급|정지|해지|취소',
+            r'가맹점|결제|일시불|리볼빙|무이자할부',
+            r'해외|국외|국내|온라인|오프라인'
         ]
         
-        keywords = []
+        keywords = set()
+        
+        # 패턴 매칭으로 키워드 추출
         for pattern in keyword_patterns:
             matches = re.findall(pattern, content, re.IGNORECASE)
-            keywords.extend(matches)
+            keywords.update(matches)
         
         # 중요한 숫자나 비율 정보
-        number_patterns = re.findall(r'\d+(?:\.\d+)?%|\d+만원|\d+개월|\d+일', content)
-        keywords.extend(number_patterns)
+        number_patterns = re.findall(r'\d+(?:\.\d+)?%|\d+만원|\d+개월|\d+일|\d+년', content)
+        keywords.update(number_patterns)
         
-        # 중복 제거 및 정렬
-        return sorted(list(set(keywords)))
+        # 절차나 단계 관련 키워드
+        if '절차' in content or '단계' in content or '방법' in content:
+            procedure_words = re.findall(r'[①-⑳]|[가-힣]\)|[1-9]\.|첫째|둘째|셋째', content)
+            keywords.update(procedure_words[:5])
+        
+        # 괄호 안의 중요 정보 추출
+        bracket_content = re.findall(r'[「『\[]([^」』\]]+)[」』\]]', content)
+        for bc in bracket_content:
+            if 2 < len(bc) < 15:  # 적절한 길이의 내용만
+                keywords.add(bc)
+        
+        # 중복 제거 및 정렬, 길이 제한
+        result = sorted([k for k in keywords if len(k) > 1 and len(k) < 15])
+        return result[:12]  # 최대 12개 키워드
     
     @staticmethod
     def _generate_summary(content: str, title: str, heading: str, section: str) -> str:

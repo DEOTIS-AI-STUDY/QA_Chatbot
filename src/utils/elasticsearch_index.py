@@ -316,6 +316,12 @@ class ElasticsearchIndexer:
             hybrid_tracker.end_preprocessing_stage(stage_name)
             return False, "추출된 텍스트가 없습니다."
         
+        # PDF 파일의 경우 처리 결과를 export
+        if file_type.upper() == "PDF":
+            export_path = ElasticsearchIndexer._export_pdf_processing_data(all_documents, "data")
+            if export_path:
+                print(f"📊 PDF 처리 결과가 export되었습니다: {export_path}")
+        
         # Elasticsearch에 저장
         return ElasticsearchIndexer._save_to_elasticsearch(all_documents, embeddings, hybrid_tracker, stage_name, file_type)
     
@@ -355,6 +361,191 @@ class ElasticsearchIndexer:
         finally:
             hybrid_tracker.end_preprocessing_stage(save_stage)
             hybrid_tracker.end_preprocessing_stage(stage_name)
+    
+    @staticmethod
+    def _export_pdf_processing_data(data, export_dir: str = "data") -> str:
+        """PDF 처리 결과를 JSON으로 export하는 함수 - 다양한 데이터 형태 지원"""
+        try:
+            import uuid
+            from datetime import datetime
+            
+            # export 디렉토리 생성
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # export 파일명 생성
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            export_filename = f"pdf_indexing_export_{timestamp}.json"
+            export_path = os.path.join(export_dir, export_filename)
+            
+            # 데이터 형태 판별 및 처리
+            processed_documents = []
+            
+            if isinstance(data, list) and data:
+                # 첫 번째 요소로 데이터 형태 판별
+                first_item = data[0]
+                
+                if hasattr(first_item, 'page_content'):
+                    # Document 객체 리스트인 경우 (_index_files_by_type에서 호출)
+                    processed_documents = data
+                elif isinstance(first_item, dict) and 'content' in first_item:
+                    # 딕셔너리 리스트인 경우 (index_all_files에서 호출)
+                    for item in data:
+                        # 딕셔너리를 Document 형태로 변환
+                        content = item.get('content', '')
+                        metadata = item.get('metadata', {})
+                        
+                        # Document-like 객체 생성 (page_content와 metadata 속성을 가진 객체)
+                        class DocumentLike:
+                            def __init__(self, page_content, metadata):
+                                self.page_content = page_content
+                                self.metadata = metadata
+                        
+                        processed_documents.append(DocumentLike(content, metadata))
+                else:
+                    raise ValueError(f"지원하지 않는 데이터 형태입니다: {type(first_item)}")
+            else:
+                print("❌ 빈 데이터 또는 잘못된 형태입니다.")
+                return ""
+            
+            # 문서 분석
+            export_data = {
+                "export_info": {
+                    "export_time": datetime.now().isoformat(),
+                    "total_documents": len(processed_documents),
+                    "file_type": "PDF",
+                    "description": "PDF 인덱싱 과정에서 vector DB에 저장될 문서들"
+                },
+                "documents": []
+            }
+            
+            # 표 관련 통계
+            table_documents = 0
+            mixed_documents = 0
+            total_table_markers = 0
+            total_markdown_lines = 0
+            
+            for doc in processed_documents:
+                # 문서 ID 생성
+                doc_id = str(uuid.uuid4())
+                
+                # 표 관련 분석
+                content = doc.page_content
+                has_table = ElasticsearchIndexer._is_table_content(content)
+                table_markers = content.count('**[표')
+                markdown_table_lines = len([line for line in content.split('\n') if '|' in line and line.strip()])
+                
+                if has_table:
+                    table_documents += 1
+                if table_markers > 0:
+                    mixed_documents += 1
+                
+                total_table_markers += table_markers
+                total_markdown_lines += markdown_table_lines
+                
+                # 문서 정보 구성
+                doc_info = {
+                    "document_id": doc_id,
+                    "filename": doc.metadata.get('filename', 'unknown'),
+                    "source": doc.metadata.get('source', ''),
+                    "content_length": len(content),
+                    "line_count": len(content.split('\n')),
+                    "has_table": has_table,
+                    "table_markers_found": table_markers,
+                    "markdown_table_lines": markdown_table_lines,
+                    "metadata": doc.metadata,
+                    "content": content
+                }
+                
+                # 페이지 정보가 있으면 추가
+                if 'page' in doc.metadata:
+                    doc_info["page"] = doc.metadata['page']
+                
+                # 표 개수 정보가 있으면 추가
+                if 'table_count' in doc.metadata:
+                    doc_info["table_count"] = doc.metadata['table_count']
+                
+                export_data["documents"].append(doc_info)
+            
+            # 통계 정보 업데이트
+            export_data["export_info"].update({
+                "total_table_documents": table_documents,
+                "total_mixed_documents": mixed_documents,
+                "table_detection_ratio": f"{table_documents}/{len(processed_documents)} ({table_documents/len(processed_documents)*100:.1f}%)" if processed_documents else "0/0 (0%)"
+            })
+            
+            # JSON 파일로 저장
+            with open(export_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"📊 PDF 처리 데이터 export 완료: {export_path}")
+            print(f"   - 총 문서: {len(processed_documents)}개")
+            print(f"   - 표 포함 문서: {table_documents}개")
+            print(f"   - 인라인 표 마커: {total_table_markers}개")
+            print(f"   - 마크다운 표 라인: {total_markdown_lines}개")
+            
+            return export_path
+            
+        except Exception as e:
+            print(f"❌ PDF 데이터 export 오류: {e}")
+            import traceback
+            print(f"오류 상세: {traceback.format_exc()}")
+            return ""
+    
+    @staticmethod
+    def _is_table_content(content: str) -> bool:
+        """표 내용인지 판단하는 함수 - 개선된 버전"""
+        if not content or len(content.strip()) < 10:
+            return False
+        
+        # 1. 인라인 표 마커가 있는 경우 (**[표 N]**)
+        if re.search(r'\*\*\[표\s*\d*\]\*\*', content):
+            return True
+        
+        # 2. mixed 타입 문서인지 확인 (메타데이터에서)
+        if 'type' in content and 'mixed' in content:
+            return True
+        
+        # 3. 마크다운 표 형식이 포함된 경우
+        lines = content.split('\n')
+        pipe_lines = [line for line in lines if '|' in line and line.strip()]
+        
+        if len(pipe_lines) >= 3:  # 최소 3줄 이상
+            # 헤더와 구분선이 있는지 확인
+            has_separator = any('---' in line or '===' in line for line in pipe_lines[:5])
+            if has_separator:
+                # 파이프 라인 비율 확인
+                pipe_ratio = len(pipe_lines) / len(lines) if lines else 0
+                if pipe_ratio >= 0.15:  # 15% 이상이 테이블 라인
+                    return True
+        
+        # 4. 표 마커와 테이블 구조가 함께 있는 경우
+        if re.search(r'\*\*\[표\]?\*\*', content) and len(pipe_lines) >= 2:
+            return True
+        
+        # 5. 테이블 관련 키워드와 구조적 특징 결합 확인
+        table_keywords = ['표', '구분', '항목', '분류', '기준', '조건', '업무', '절차', '방법', '내용']
+        keyword_found = any(keyword in content for keyword in table_keywords)
+        
+        if keyword_found and len(pipe_lines) >= 2:
+            # 정규 표현식으로 테이블 패턴 감지
+            table_pattern = r'\|[^|]*\|[^|]*\|'
+            if re.search(table_pattern, content):
+                return True
+        
+        # 6. 구조화된 정보 패턴 감지 (리스트 형태)
+        structured_lines = [line for line in lines if re.search(r'[•·▪\-]\s*', line) or ':' in line]
+        if len(structured_lines) >= 3 and len(structured_lines) / len(lines) >= 0.25:
+            return True
+        
+        # 7. 페이지 정보와 함께 있는 표 데이터
+        if "페이지" in content and len(pipe_lines) >= 2:
+            return True
+        
+        # 8. 표 제목이 있는 경우
+        if re.search(r'표\s*\d+', content) and len(pipe_lines) >= 1:
+            return True
+        
+        return False
     
     @staticmethod
     def _extract_text_from_json(json_data: Any, max_depth: int = 10) -> str:
@@ -420,6 +611,9 @@ class ElasticsearchIndexer:
             type_dir = os.path.join(data_dir, file_type)
             files = list_func(type_dir)
             
+            # PDF 파일인 경우 export를 위한 데이터 수집 초기화
+            pdf_processing_data = [] if file_type.lower() == 'pdf' else None
+            
             for file_path in files:
                 stage_name = f"{file_type.upper()}_처리_{os.path.basename(file_path)}"
                 hybrid_tracker.track_preprocessing_stage(stage_name)
@@ -444,6 +638,17 @@ class ElasticsearchIndexer:
                         
                         doc.metadata.update(base_metadata)
                         
+                        # PDF 파일인 경우 export 데이터 수집
+                        if file_type.lower() == 'pdf' and pdf_processing_data is not None:
+                            is_table = ElasticsearchIndexer._is_table_content(doc.page_content)
+                            pdf_processing_data.append({
+                                "content": doc.page_content,
+                                "metadata": doc.metadata,
+                                "is_table": is_table,
+                                "content_length": len(doc.page_content),
+                                "filename": os.path.basename(file_path)
+                            })
+                        
                         # 표가 아닌 경우만 분할
                         if "표" not in doc.page_content:
                             chunks = splitter.split_documents([doc])
@@ -457,6 +662,14 @@ class ElasticsearchIndexer:
                     print(f"{file_type.upper()} 파일 처리 오류 ({file_path}): {e}")
                 finally:
                     hybrid_tracker.end_preprocessing_stage(stage_name)
+            
+            # PDF 파일 처리 완료 후 export 실행
+            if file_type.lower() == 'pdf' and pdf_processing_data:
+                try:
+                    ElasticsearchIndexer._export_pdf_processing_data(pdf_processing_data, data_dir)
+                    print(f"📊 PDF 처리 데이터가 /data 디렉토리에 export되었습니다.")
+                except Exception as e:
+                    print(f"⚠️ PDF export 중 오류 발생: {e}")
         
         if not all_documents:
             hybrid_tracker.end_preprocessing_stage("전체_파일_인덱싱_시작")

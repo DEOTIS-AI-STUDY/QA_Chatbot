@@ -130,7 +130,23 @@ class ImprovedIndexJSONGenerator:
         content_buffer = []
         
         for item in content_items:
-            if item.get('type') != 'paragraph':
+            item_type = item.get('type')
+            
+            # 에러 타입 처리
+            if item_type == 'error':
+                print(f"오류 발생: {item.get('content', '')}")
+                continue
+            
+            # 표 타입 처리 - 마크다운 변환된 내용을 content_buffer에 추가
+            if item_type == 'table':
+                table_content = item.get('content', '')
+                if table_content:
+                    # 표 데이터를 텍스트 흐름에 포함 (별도 객체 생성하지 않음)
+                    content_buffer.append(f"\n\n**[표]**\n\n{table_content}\n")
+                continue
+            
+            # 단락 타입만 처리
+            if item_type != 'paragraph':
                 continue
             
             text = item['content'].strip()

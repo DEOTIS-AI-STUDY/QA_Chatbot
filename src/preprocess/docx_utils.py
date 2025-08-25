@@ -186,23 +186,35 @@ class ContentExtractor:
         }
     
     def _extract_table_content(self, table: Table) -> Dict[str, Any]:
-        """표에서 컨텐츠 추출"""
-        rows_data = []
+        """표에서 컨텐츠 추출 및 마크다운 변환"""
+        # docparser의 parse_table 함수를 사용하여 마크다운으로 변환
+        import sys
+        import os
         
-        for row_idx, row in enumerate(table.rows):
+        # 프로젝트 루트를 sys.path에 추가
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        from src.utils.docparser import parse_table
+        
+        markdown_lines = parse_table(table)
+        markdown_content = '\n'.join(markdown_lines)
+        
+        # 원본 데이터도 저장
+        rows_data = []
+        for row in table.rows:
             row_data = []
-            for cell_idx, cell in enumerate(row.cells):
+            for cell in row.cells:
                 cell_text = cell.text.strip()
-                row_data.append({
-                    "text": cell_text,
-                    "row": row_idx,
-                    "col": cell_idx
-                })
+                row_data.append(cell_text)
             rows_data.append(row_data)
         
         return {
             "type": "table",
-            "content": rows_data,
+            "content": markdown_content,
+            "raw_data": rows_data,
             "dimensions": {
                 "rows": len(table.rows),
                 "columns": len(table.columns) if table.rows else 0

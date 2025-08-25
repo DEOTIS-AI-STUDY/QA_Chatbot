@@ -217,14 +217,23 @@ class ImprovedIndexJSONGenerator:
         # 최종 컨텐츠 생성
         final_content = '\n'.join(hierarchy_parts) if hierarchy_parts else ""
         
+        # 표 데이터 포함 여부 확인
+        has_table = bool(final_content and '**[표]**' in final_content)
+        
         # 데이터 추가 (빈 내용이라도 구조가 있으면 추가)
         if final_content or title or heading or section:
-            parsed_data.append({
+            data_block = {
                 "title": title,
                 "heading": heading, 
                 "section": section,
                 "content": final_content
-            })
+            }
+            
+            # 표가 있는 경우 hasTable 속성 추가
+            if has_table:
+                data_block["hasTable"] = True
+                
+            parsed_data.append(data_block)
     
     def _clean_text(self, text: str) -> str:
         """텍스트 정리"""

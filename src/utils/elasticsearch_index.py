@@ -514,7 +514,8 @@ class ElasticsearchIndexer:
                                 'section': section if section else '',
                                 'category': ElasticsearchIndexer._extract_category(title, heading),
                                 'topic': ElasticsearchIndexer._extract_topic(title, heading, section),
-                                'content_type': ElasticsearchIndexer._classify_content_type(content)
+                                'content_type': ElasticsearchIndexer._classify_content_type(content),
+                                'has_table': item.get('hasTable', False)  # hasTable 속성 추가
                             }
                             
                             # 검색 친화적 문서 내용 구성
@@ -558,12 +559,17 @@ class ElasticsearchIndexer:
                         if len(items) > 1:  # 여러 항목이 있는 경우만 통합 문서 생성
                             content_parts = []
                             all_keywords = set()
+                            has_any_table = False  # 표 포함 여부 체크
                             
                             for item in items:
                                 content = item.get('content', '').strip()
                                 if content:
                                     heading = item.get('heading', '').strip()
                                     section = item.get('section', '').strip()
+                                    
+                                    # 표 포함 여부 확인
+                                    if item.get('hasTable', False):
+                                        has_any_table = True
                                     
                                     part_header = []
                                     if heading:
@@ -588,7 +594,8 @@ class ElasticsearchIndexer:
                                     'title': title,
                                     'category': ElasticsearchIndexer._extract_category(title, ''),
                                     'keywords': ', '.join(sorted(all_keywords)),
-                                    'item_count': len(items)
+                                    'item_count': len(items),
+                                    'has_table': has_any_table  # 통합 문서의 표 포함 여부
                                 }
                                 
                                 document_content = f"대분류: {title}\n\n주요 키워드: {', '.join(sorted(all_keywords))}\n\n통합 내용:\n{consolidated_content}"

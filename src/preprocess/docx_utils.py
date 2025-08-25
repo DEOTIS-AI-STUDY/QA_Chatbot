@@ -143,22 +143,30 @@ class ContentExtractor:
         self.extracted_content = []
     
     def extract_all_content(self, doc_path: str) -> List[Dict[str, Any]]:
-        """문서의 모든 컨텐츠를 순서대로 추출"""
+        """문서의 모든 컨텐츠를 문서 순서대로 추출"""
         try:
             doc = Document(doc_path)
             content_items = []
             
-            # 단락들 추출
-            for paragraph in doc.paragraphs:
-                para_content = self._extract_paragraph_content(paragraph)
-                if para_content:
-                    content_items.append(para_content)
-            
-            # 표들 추출
-            for table in doc.tables:
-                table_content = self._extract_table_content(table)
-                if table_content:
-                    content_items.append(table_content)
+            # document.body의 실제 순서를 따라 처리
+            for element in doc.element.body:
+                if element.tag.endswith('p'):  # 단락
+                    # 해당 element에 대응하는 paragraph 찾기
+                    for paragraph in doc.paragraphs:
+                        if paragraph._element == element:
+                            para_content = self._extract_paragraph_content(paragraph)
+                            if para_content:
+                                content_items.append(para_content)
+                            break
+                
+                elif element.tag.endswith('tbl'):  # 표
+                    # 해당 element에 대응하는 table 찾기
+                    for table in doc.tables:
+                        if table._tbl == element:
+                            table_content = self._extract_table_content(table)
+                            if table_content:
+                                content_items.append(table_content)
+                            break
             
             return content_items
             
@@ -186,28 +194,84 @@ class ContentExtractor:
         }
     
     def _extract_table_content(self, table: Table) -> Dict[str, Any]:
-        """표에서 컨텐츠 추출"""
-        rows_data = []
+        """표에서 컨텐츠 추출 및 마크다운 변환"""
+        # docparser의 parse_table 함수를 사용하여 마크다운으로 변환
+        import sys
+        import os
         
-        for row_idx, row in enumerate(table.rows):
+        # 프로젝트 루트를 sys.path에 추가
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        try:
+            from src.utils.docparser import parse_table
+            markdown_lines = parse_table(table)
+            markdown_content = '\n'.join(markdown_lines)
+        except ImportError:
+            # 직접 구현한 간단한 표 파싱
+            markdown_content = self._parse_table_fallback(table)
+        
+        # 빈 표 체크
+        if not markdown_content.strip():
+            return None
+        
+        # 원본 데이터도 저장
+        rows_data = []
+        for row in table.rows:
             row_data = []
-            for cell_idx, cell in enumerate(row.cells):
+            for cell in row.cells:
                 cell_text = cell.text.strip()
-                row_data.append({
-                    "text": cell_text,
-                    "row": row_idx,
-                    "col": cell_idx
-                })
+                row_data.append(cell_text)
             rows_data.append(row_data)
+        
+        # 모든 셀이 비어있는 표는 제외
+        if all(not cell for row in rows_data for cell in row):
+            return None
         
         return {
             "type": "table",
-            "content": rows_data,
+            "content": markdown_content,
+            "raw_data": rows_data,
             "dimensions": {
                 "rows": len(table.rows),
                 "columns": len(table.columns) if table.rows else 0
             }
         }
+    
+    def _parse_table_fallback(self, table: Table) -> str:
+        """표 파싱 fallback 함수"""
+        lines = []
+        rows = table.rows
+        if len(rows) < 1:
+            return ""
+        
+        # 헤더 행
+        header = []
+        for cell in rows[0].cells:
+            cell_text = cell.text.strip().replace('\n', ' ')
+            header.append(cell_text if cell_text else " ")
+        
+        if not any(header):  # 헤더가 모두 비어있으면 표 제외
+            return ""
+        
+        md_header = "| " + " | ".join(header) + " |"
+        md_sep = "| " + " | ".join(["---"] * len(header)) + " |"
+        lines.append(md_header)
+        lines.append(md_sep)
+        
+        # 데이터 행
+        for row in rows[1:]:
+            row_items = []
+            for col_idx, cell in enumerate(row.cells):
+                if col_idx < len(header):
+                    value = cell.text.strip().replace('\n', ' ')
+                    row_items.append(value if value else " ")
+            if any(row_items):  # 빈 행이 아닌 경우만 추가
+                lines.append("| " + " | ".join(row_items) + " |")
+        
+        return '\n'.join(lines)
 
 
 class PatternMatcher:

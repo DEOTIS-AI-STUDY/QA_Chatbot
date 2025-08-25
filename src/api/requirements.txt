@@ -57,3 +57,10 @@ langfuse>=2.0.0
 # 클라이언트용 HTTP 라이브러리
 aiohttp>=3.8.0
 requests>=2.31.0
+
+
+# PDF 표 추출을 위한 추가 라이브러리
+pdfplumber>=0.9.0
+tabula-py>=2.8.2
+camelot-py[cv]>=0.10.1
+pandas>=1.5.0

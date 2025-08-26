@@ -156,8 +156,12 @@ def create_endpoints(app, current_api_dir: str):
         """지원하는 변환 형식 목록"""
         converter = FileConverterFactory()
         return {
-            "supported_formats": ["txt", "json", "pdf"],
-            "converters": converter.get_available_converters()
+            "supported_formats": converter.get_supported_formats(),
+            "converters": {
+                "txt": converter.get_conversion_types("txt"),
+                "json": converter.get_conversion_types("json"),
+                "pdf": converter.get_conversion_types("pdf")
+            }
         }
 
     @app.post("/convert/file", response_model=ConversionResponse)

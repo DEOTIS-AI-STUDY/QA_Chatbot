@@ -241,7 +241,7 @@ class FastAPIRAGSystem:
         
         return await asyncio.get_event_loop().run_in_executor(None, _initialize_rag_system)
     
-    async def process_query_async(self, query: str, session_id: str = "default") -> Dict[str, Any]:
+    async def process_query_async(self, query: str, session_id: str = "default", user_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """질의 처리 (비동기 버전, 의미+키워드 검색 병합)"""
         if not self.is_initialized or not self.rag_chain:
             return {
@@ -259,13 +259,25 @@ class FastAPIRAGSystem:
                 # Langfuse 트레이스 생성
                 trace = None
                 if self.langfuse_manager:
+                    trace_metadata = {
+                        "session_id": session_id,
+                        "model": self.model_choice,
+                        "top_k": self.top_k
+                    }
+                    # 사용자 데이터가 있으면 트레이스 메타데이터에 추가
+                    if user_data and isinstance(user_data, dict):
+                        trace_metadata.update({
+                            "user_id": user_data.get("userId"),
+                            "user_name": user_data.get("userName"),
+                            "user_age": user_data.get("age"),
+                            "user_income": user_data.get("income"),
+                            "is_authenticated": user_data.get("isAuthenticated"),
+                            "login_time": user_data.get("loginTime")
+                        })
+                    
                     trace = self.langfuse_manager.create_trace(
                         name="rag_query",
-                        metadata={
-                            "session_id": session_id,
-                            "model": self.model_choice,
-                            "top_k": self.top_k
-                        }
+                        metadata=trace_metadata
                     )
 
                 # 대화 기록 관리자 가져오기
@@ -317,8 +329,35 @@ class FastAPIRAGSystem:
                 ])
                 print(f"🔍 최종 문서 컨텍스트 길이: {len(docs_text)} 문자")
 
+
+                # 개인 정보 관련 질의인지 판단 // 판단만 하고 아직 쓰진 않음
+                personal_keywords = ['내', '나의', '내가', '내 카드', '내 정보', '내 결제일', '내 혜택', '내 포인트']
+                is_personal_query = any(keyword in query for keyword in personal_keywords)
+    
+
+                # 사용자 정보 기반 개인화된 컨텍스트 생성
+                personalized_context = docs_text
+                if user_data and isinstance(user_data, dict):
+                    user_context = f"""
+사용자 정보:
+- 이름: {user_data.get('userName', 'N/A')}
+- 나이: {user_data.get('age', 'N/A')}세
+- 연소득: {user_data.get('income', 'N/A')}원
+- 인증 상태: {'인증됨' if user_data.get('isAuthenticated') else '미인증'}
+"""
+                    # 보유 카드 정보 추가
+                    user_data_obj = user_data.get('data', {})
+                    if user_data_obj and isinstance(user_data_obj, dict) and user_data_obj.get('ownCardArr'):
+                        user_context += "\n보유 카드:\n"
+                        for card in user_data_obj['ownCardArr']:
+                            if isinstance(card, dict):
+                                user_context += f"- {card.get('bank', 'N/A')} {card.get('name', 'N/A')} ({card.get('type', 'N/A')}, 결제일: {card.get('paymentDate', 'N/A')}일)\n"
+                    
+                    personalized_context = user_context + "\n\n관련 문서:\n" + docs_text
+                    print(f"🔍 개인화된 컨텍스트 길이: {len(personalized_context)} 문자")
+
                 # 검색된 자료와 재정의 질문을 LLM에 넘겨서 답변 생성
-                result = self.qa_chain.invoke({"question": refined_query, "context": docs_text})
+                result = self.qa_chain.invoke({"question": refined_query, "context": personalized_context})
 
                 # 디버깅: 실제 응답 구조 출력
                 print(f"🔍 RAG 체인 응답 구조: {result}")
@@ -365,6 +404,7 @@ class FastAPIRAGSystem:
                         "query": query,
                         "refined_query": refined_query,
                         "session_id": session_id,
+                        "username": user_data.get("userName", "") if user_data and isinstance(user_data, dict) else "",  # 사용자 데이터 포함
                         "processing_time": processing_time,
                         "retrieved_docs": retrieved_docs
                     }

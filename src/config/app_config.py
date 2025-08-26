@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 from core.config import LLM_MODELS, HUGGINGFACE_EMBEDDINGS_AVAILABLE, OLLAMA_AVAILABLE
 from core.models import ModelFactory
-from core.rag import create_llm_chain, create_rag_chain, create_retriever, prompt_for_refined_query, prompt_for_query, prompt_for_context_summary
+from core.rag import create_llm_chain, create_rag_chain, create_retriever, create_enhanced_retriever, prompt_for_refined_query, prompt_for_query, prompt_for_context_summary
 from core.chat_history import ChatHistoryManager
 from utils.elasticsearch import ElasticsearchManager
 
@@ -180,8 +180,8 @@ class FastAPIRAGSystem:
                     callbacks=callbacks
                 )
 
-                # Retriever 생성
-                self.retriever = create_retriever(
+                # 고도화된 하이브리드 Retriever 생성
+                self.retriever = create_enhanced_retriever(
                     embedding_model=self.embedding_model,
                     top_k=top_k
                 )
@@ -270,55 +270,37 @@ class FastAPIRAGSystem:
                 # 대화 기록 관리자 가져오기
                 chat_manager = self.get_chat_manager(session_id)
 
-                # 대화 기록으로 질문 재정의 (키워드 검색 포함)
+                # 대화 기록으로 질문 재정의
                 history = chat_manager.build_history()
                 print(f"🔍 대화 기록: {history}")
-                print(f"🔍 질의: {query}")
+                print(f"🔍 원본 질의: {query}")
+
+                # # 질문 재정의를 위한 초기 검색 (의미 + 키워드)
+                # initial_semantic_docs = self.retriever.get_relevant_documents(query)
+                # initial_keyword_results = ElasticsearchManager.keyword_search(query, top_k=3)
                 
-                # 질문 재정의를 위한 초기 검색 (의미 + 키워드)
-                initial_semantic_docs = self.retriever.get_relevant_documents(query)
-                initial_keyword_results = ElasticsearchManager.keyword_search(query, top_k=3)
-                
-                # 초기 검색 결과 병합 (재질의용)
-                initial_context = []
-                for doc in initial_semantic_docs[:3]:  # 상위 3개만
-                    initial_context.append(getattr(doc, "page_content", str(doc)))
-                for kdoc in initial_keyword_results[:2]:  # 상위 2개만
-                    content = kdoc.get("content", "")
-                    if content and content not in initial_context:
-                        initial_context.append(content)
-                
+                # # 초기 검색 결과 병합 (재질의용)
+                # initial_context = []
+                # for doc in initial_semantic_docs[:3]:  # 상위 3개만
+                #     initial_context.append(getattr(doc, "page_content", str(doc)))
+                # for kdoc in initial_keyword_results[:2]:  # 상위 2개만
+                #     content = kdoc.get("content", "")
+                #     if content and content not in initial_context:
+                #         initial_context.append(content)
+
                 # 질문을 알맞게 변경하기위함이기에 history만을 context에 사용
                 refined_query = self.refinement_chain.run({"question": query, "context": history})
                 print(f"🔍 정제된 질의: {refined_query}")
 
-                # 정제된 질의로 최종 검색 1단계: 의미론적 검색
-                docs_semantic = self.retriever.get_relevant_documents(refined_query)
-                print(f"🔍 의미 기반 검색 결과 개수: {len(docs_semantic)}")
+                # 고도화된 하이브리드 검색 (시맨틱 + 키워드 + 스코어링이 모두 포함됨)
+                merged_docs = self.retriever.get_relevant_documents(refined_query)
+                print(f"🔍 고도화된 하이브리드 검색 결과 개수: {len(merged_docs)}")
 
-                # 정제된 질의로 최종 검색 2단계: 키워드 검색
-                keyword_results = ElasticsearchManager.keyword_search(refined_query, top_k=self.top_k)
-                print(f"🔍 키워드 기반 검색 결과 개수: {len(keyword_results)}")
-
-                # 정제된 질의로 최종 검색 3단계: 의미/키워드 결과 병합
-                # 의미/키워드 결과 병합 (중복 제거, 우선순위: 의미 기반 → 키워드 기반)
-                seen = set()
-                merged_docs = []
-                # 의미 기반 결과 먼저
-                for doc in docs_semantic:
-                    content = getattr(doc, "page_content", str(doc))
-                    if content not in seen:
-                        merged_docs.append(content)
-                        seen.add(content)
-                # 키워드 기반 결과 추가
-                for kdoc in keyword_results:
-                    content = kdoc.get("content", "")
-                    if content and content not in seen:
-                        merged_docs.append(content)
-                        seen.add(content)
-
-                docs_text = "\n".join(merged_docs)
-                print(f"🔍 병합된 문서 개수: {len(merged_docs)}")
+                # 문서를 텍스트로 변환
+                docs_text = "\n\n---\n\n".join([
+                    getattr(doc, "page_content", str(doc)) for doc in merged_docs
+                ])
+                print(f"🔍 최종 문서 컨텍스트 길이: {len(docs_text)} 문자")
 
                 # 검색된 자료와 재정의 질문을 LLM에 넘겨서 답변 생성
                 result = self.qa_chain.invoke({"question": refined_query, "context": docs_text})
@@ -353,19 +335,13 @@ class FastAPIRAGSystem:
                             }
                         )
 
-                    # retrieved_docs에 의미/키워드 결과 모두 포함
+                    # retrieved_docs에 고도화된 검색 결과 포함
                     retrieved_docs = []
-                    for doc in docs_semantic:
+                    for doc in merged_docs:
                         retrieved_docs.append({
-                            "type": "semantic",
+                            "type": "enhanced_hybrid",
                             "content": getattr(doc, "page_content", str(doc)),
                             "metadata": getattr(doc, "metadata", {})
-                        })
-                    for kdoc in keyword_results:
-                        retrieved_docs.append({
-                            "type": "keyword",
-                            "content": kdoc.get("content", ""),
-                            "metadata": kdoc.get("metadata", {})
                         })
 
                     return {

@@ -486,7 +486,7 @@ def create_llm_chain(llm_model, prompt_template, input_variables=None):
 
 def create_retriever(embedding_model, top_k=3):
     """
-    Elasticsearch 기반 Retriever 생성 함수
+    기본 Elasticsearch 기반 Retriever 생성 함수 (하위 호환성)
     :param embedding_model: 임베딩 모델 객체
     :param top_k: 검색할 문서 개수
     :return: Retriever 객체 또는 None
@@ -516,8 +516,165 @@ def create_retriever(embedding_model, top_k=3):
                 "fetch_k": min(top_k * 3, 10000)
             }
         )
-        print("✅ Retriever 생성 성공")
+        print("✅ 기본 Retriever 생성 성공")
         return retriever
     except Exception as e:
         print(f"❌ Retriever 생성 오류: {str(e)}")
+        return None
+
+def create_enhanced_retriever(embedding_model, top_k=3):
+    """
+    고도화된 하이브리드 검색 Retriever 생성 함수
+    - 시맨틱 + 키워드 검색 조합
+    - 정교한 스코어링 시스템
+    - 메타데이터 기반 가중치
+    - 관련성 임계값으로 환각 방지
+    
+    :param embedding_model: 임베딩 모델 객체
+    :param top_k: 검색할 문서 개수
+    :return: Enhanced Retriever 객체 또는 None
+    """
+    try:
+        from core.config import ELASTICSEARCH_URL, INDEX_NAME
+        from langchain_community.vectorstores import ElasticsearchStore
+        
+        # Elasticsearch 연결 확인
+        es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
+        if not success:
+            print(f"❌ Elasticsearch 연결 실패: {message}")
+            return None
+            
+        if not es_client.indices.exists(index=INDEX_NAME):
+            print(f"❌ 인덱스 '{INDEX_NAME}'가 존재하지 않습니다.")
+            return None
+            
+        doc_count = es_client.count(index=INDEX_NAME).get("count", 0)
+        if doc_count == 0:
+            print(f"❌ 인덱스 '{INDEX_NAME}'에 문서가 없습니다.")
+            return None
+        
+        # 벡터스토어 생성
+        vectorstore = ElasticsearchStore(
+            embedding=embedding_model,
+            index_name=INDEX_NAME,
+            es_url=ELASTICSEARCH_URL,
+        )
+        
+        # 기본 시맨틱 검색 리트리버 (확장된 후보군)
+        base_retriever = vectorstore.as_retriever(
+            search_kwargs={
+                "k": top_k * 2,  # 더 많은 후보 확보
+                "fetch_k": min(top_k * 6, 10000)  # 초기 검색 범위 확대
+            }
+        )
+        
+        def enhanced_retrieve(query):
+            """고도화된 하이브리드 검색 로직"""
+            try:
+                # 1차: 시맨틱 검색
+                semantic_docs = base_retriever.get_relevant_documents(query)
+                
+                # 2차: 키워드 검색으로 보완
+                keyword_results = ElasticsearchManager.keyword_search(query, top_k * 2)
+                
+                # 3차: 정교한 스코어링 시스템
+                query_keywords = query.lower().split()
+                scored_docs = []
+                
+                for doc in semantic_docs:
+                    content = doc.page_content.lower()
+                    
+                    # 기본 키워드 매칭 점수
+                    keyword_score = sum(1 for keyword in query_keywords if keyword in content)
+                    
+                    # 관련성 임계값 설정 (환각 방지)
+                    min_relevance_score = 0.1
+                    if keyword_score == 0 and len(doc.page_content) < 50:
+                        # 키워드 매칭이 전혀 없고 내용이 너무 짧으면 제외
+                        continue
+                    
+                    metadata_score = 0
+                    
+                    # 메타데이터 기반 스코어링
+                    if hasattr(doc, 'metadata') and doc.metadata:
+                        # 구조 타입 기반 가중치
+                        if doc.metadata.get('structure_type') == '업무안내서' and '업무' in query:
+                            metadata_score += 2
+                        if doc.metadata.get('content_type') == '절차안내' and ('절차' in query or '방법' in query):
+                            metadata_score += 1.5
+                        
+                        # 표 포함 문서 가중치
+                        if doc.metadata.get('has_tables') and ('표' in query or '목록' in query or '기준' in query):
+                            metadata_score += 1
+                        if doc.metadata.get('has_table') and ('표' in query or '목록' in query):
+                            metadata_score += 1
+                            
+                        # 카테고리 기반 가중치
+                        if doc.metadata.get('category') == 'DOCX' and ('안내' in query or '절차' in query):
+                            metadata_score += 1.5
+                        if doc.metadata.get('category') == 'PDF' and ('규정' in query or '정책' in query):
+                            metadata_score += 1.2
+                            
+                        # 제목/헤딩 매칭 가중치
+                        title = doc.metadata.get('title', '').lower()
+                        heading = doc.metadata.get('heading', '').lower()
+                        for keyword in query_keywords:
+                            if keyword in title:
+                                metadata_score += 2
+                            if keyword in heading:
+                                metadata_score += 1.5
+                                
+                        # 키워드 필드 매칭 가중치
+                        keywords_field = doc.metadata.get('keywords', '').lower()
+                        for keyword in query_keywords:
+                            if keyword in keywords_field:
+                                metadata_score += 1
+                    
+                    # 키워드 검색 결과와 매칭 보너스
+                    filename = doc.metadata.get('filename', '') if hasattr(doc, 'metadata') else ''
+                    for kw_result in keyword_results:
+                        if isinstance(kw_result, dict):
+                            kw_filename = kw_result.get('metadata', {}).get('filename', '')
+                        else:
+                            kw_filename = getattr(kw_result, 'metadata', {}).get('filename', '') if hasattr(kw_result, 'metadata') else ''
+                        
+                        if kw_filename and kw_filename == filename:
+                            metadata_score += 1
+                            break
+                    
+                    total_score = keyword_score + metadata_score
+                    
+                    # 최소 점수 이상인 문서만 포함 (환각 방지)
+                    if total_score >= min_relevance_score:
+                        scored_docs.append((doc, total_score))
+                
+                # 스코어 기반 정렬 후 상위 k개 반환
+                scored_docs.sort(key=lambda x: x[1], reverse=True)
+                final_docs = [doc for doc, _ in scored_docs[:top_k]]
+                
+                # 빈 결과 처리
+                if not final_docs:
+                    print("⚠️ 관련성 있는 문서를 찾을 수 없습니다.")
+                
+                return final_docs
+                
+            except Exception as e:
+                print(f"❌ 고도화된 검색 중 오류: {str(e)}")
+                # 오류 시 기본 시맨틱 검색으로 폴백
+                return base_retriever.get_relevant_documents(query)[:top_k]
+        
+        # 커스텀 리트리버 클래스 생성
+        class EnhancedRetriever(BaseRetriever):
+            def _get_relevant_documents(self, query: str, *, run_manager=None):
+                return enhanced_retrieve(query)
+                
+            def get_relevant_documents(self, query):
+                return enhanced_retrieve(query)
+        
+        enhanced_retriever = EnhancedRetriever()
+        print(f"✅ 고도화된 하이브리드 리트리버 생성 완료 (top_k: {top_k})")
+        return enhanced_retriever
+        
+    except Exception as e:
+        print(f"❌ 고도화된 Retriever 생성 오류: {str(e)}")
         return None

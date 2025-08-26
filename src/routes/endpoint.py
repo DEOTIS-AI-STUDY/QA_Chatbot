@@ -105,7 +105,7 @@ def create_endpoints(app, current_api_dir: str):
     @app.post("/query")
     async def process_query(request: QueryRequest, rag_system: FastAPIRAGSystem = Depends(get_rag_system)):
         """질의 처리"""
-        result = await rag_system.process_query_async(request.query, request.session_id)
+        result = await rag_system.process_query_async(request.query, request.session_id, request.userdata)
         
         if result["status"] == "error":
             raise HTTPException(status_code=500, detail=result["message"])
@@ -156,8 +156,12 @@ def create_endpoints(app, current_api_dir: str):
         """지원하는 변환 형식 목록"""
         converter = FileConverterFactory()
         return {
-            "supported_formats": ["txt", "json", "pdf"],
-            "converters": converter.get_available_converters()
+            "supported_formats": converter.get_supported_formats(),
+            "converters": {
+                "txt": converter.get_conversion_types("txt"),
+                "json": converter.get_conversion_types("json"),
+                "pdf": converter.get_conversion_types("pdf")
+            }
         }
 
     @app.post("/convert/file", response_model=ConversionResponse)

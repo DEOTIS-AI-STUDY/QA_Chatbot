@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class QueryRequest(BaseModel):
     query: str = Field(..., description="질문 내용", min_length=1)
     session_id: str = Field(default="default", description="세션 ID")
+    userdata: Optional[Dict[str, Any]] = Field(default=None, description="사용자 데이터")
 
 
 class InitRequest(BaseModel):

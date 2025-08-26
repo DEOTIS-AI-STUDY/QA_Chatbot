@@ -2,6 +2,7 @@
 환경 설정 및 애플리케이션 초기화 로직
 """
 
+import json
 import os
 import sys
 from typing import Dict, Any
@@ -289,8 +290,22 @@ class FastAPIRAGSystem:
                 #         initial_context.append(content)
 
                 # 질문을 알맞게 변경하기위함이기에 history만을 context에 사용
-                refined_query = self.refinement_chain.run({"question": query, "context": history})
-                print(f"🔍 정제된 질의: {refined_query}")
+
+                refined_query_str = self.refinement_chain.run({"question": query, "context": history})
+                print(f"🔍 정제된 질의 (원본): {refined_query_str}")
+                try:
+                    refined_query_dic = json.loads(refined_query_str)
+                    refined_query = refined_query_dic.get('refined_query')
+                    print(f"🔍 정제된 질의: {refined_query_dic.get('refined_query')}")
+                    if refined_query_dic.get('action') == 'reset':
+                        # 대화 기록 초기화
+                        chat_manager.clear_history()
+                        print("🔄 대화 기록 초기화됨")
+                except Exception as e:
+                    print(f"❌ 정제된 질의 JSON 파싱 실패: {str(e)}")
+                    refined_query = query
+                    chat_manager.clear_history()
+                    print("🔄 대화 기록 초기화됨 (파싱 실패)")
 
                 # 고도화된 하이브리드 검색 (시맨틱 + 키워드 + 스코어링이 모두 포함됨)
                 merged_docs = self.retriever.get_relevant_documents(refined_query)
@@ -319,7 +334,7 @@ class FastAPIRAGSystem:
                     answer_summary = self.summary_chain.run({"context": answer})
                     print(f"🔍 답변 요약: {answer_summary}")
                     # 대화 기록에 질문과 답변 추가
-                    chat_manager.add_chat(refined_query, answer_summary)
+                    chat_manager.add_chat(query, answer_summary)
 
                     # Langfuse에 결과 로그
                     if trace and self.langfuse_manager:
@@ -348,6 +363,7 @@ class FastAPIRAGSystem:
                         "status": "success",
                         "answer": answer,
                         "query": query,
+                        "refined_query": refined_query,
                         "session_id": session_id,
                         "processing_time": processing_time,
                         "retrieved_docs": retrieved_docs

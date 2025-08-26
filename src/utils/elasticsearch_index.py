@@ -344,6 +344,21 @@ class ElasticsearchIndexer:
             if not success:
                 raise Exception(f"Elasticsearch 연결 실패: {message}")
             
+            mapping = {
+                "mappings":{
+                    "properties":{
+                        "text":{
+                            "type":"text",
+                            "analyzer":"nori"
+                        }
+                    }
+                }
+            }
+
+            if es_client.indices.exists(index=INDEX_NAME):
+                es_client.indices.delete(index=INDEX_NAME)
+            es_client.indices.create(index=INDEX_NAME, body=mapping)
+
             ElasticsearchStore.from_documents(
                 documents,
                 embedding=embeddings,

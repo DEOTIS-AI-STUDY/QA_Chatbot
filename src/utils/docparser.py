@@ -120,29 +120,89 @@ def parse_docx_file(filepath):
     return "\n".join(result_lines), tables_blocks
 
 def main():
-    data_dir = "./data/"
-    output_file = "data/data.txt"
-    tables_file = "data/tables.txt"
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+    data_dir = os.path.join(base_dir, 'data')
+    output_dir = os.path.join(data_dir, 'docx')
+    print(f"[INFO] 변환 대상 폴더: {data_dir}")
+    print(f"[INFO] 결과 저장 폴더: {output_dir}")
+    os.makedirs(output_dir, exist_ok=True)
 
     files = [f for f in os.listdir(data_dir) if os.path.isfile(os.path.join(data_dir, f))]
+    print(f"[INFO] data 폴더 내 파일 목록: {files}")
     docx_files = [f for f in files if f.lower().endswith('.docx')]
+    print(f"[INFO] 변환할 docx 파일 목록: {docx_files}")
 
-    all_parsed = []
-    all_tables = []
     for filename in docx_files:
+        print(f"[INFO] 파일 처리 시작: {filename}")
         filepath = os.path.join(data_dir, filename)
-        parsed, tables_blocks = parse_docx_file(filepath)
-        all_parsed.append(f"--- {filename} ---\n{parsed}\n")
-        for block in tables_blocks:
-            all_tables.append(f"--- {filename} ---\n{block}")
+        try:
+            doc = Document(filepath)
+        except Exception as e:
+            print(f"[ERROR] 파일 열기 실패: {filename}, 에러: {e}")
+            continue
+        nsmap = ns.nsmap
 
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write("\n".join(all_parsed))
-    with open(tables_file, "w", encoding="utf-8") as f:
-        f.write("\n".join(all_tables))
-    print(f"모든 docx 결과가 {output_file}에 저장되었습니다.")
-    print(f"모든 표와 표 위 2단락 결과가 {tables_file}에 저장되었습니다.")
+        # 새 문서 생성
+        new_doc = Document()
+
+        img_count = 1
+        for block in doc.element.body:
+            if block.tag.endswith('tbl'):
+                # 표를 마크다운 텍스트로 변환 후 기존 표는 삭제
+                for table in doc.tables:
+                    if table._tbl == block:
+                        print(f"[INFO] 표 발견 및 변환: {filename}")
+                        md_lines = parse_table(table)
+                        if md_lines:
+                            for md_line in md_lines:
+                                new_doc.add_paragraph(md_line)
+                        break
+            elif block.tag.endswith('p'):
+                for para in doc.paragraphs:
+                    if para._p == block:
+                        # 하이퍼링크 변환
+                        links = extract_hyperlinks(para)
+                        if links:
+                            for link_text, url in links:
+                                print(f"[INFO] 하이퍼링크 변환: {link_text}({url}) in {filename}")
+                                if link_text.strip():
+                                    new_doc.add_paragraph(f"{link_text}({url})")
+                        # 이미지 처리
+                        nsmap = ns.nsmap
+                        img_found = False
+                        for drawing in para._element.findall('.//w:drawing', nsmap):
+                            img_found = True
+                            docpr = drawing.find('.//wp:docPr', {'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'})
+                            img_name = docpr.attrib.get('name') if docpr is not None else f"그림 {img_count}"
+                            img_descr = docpr.attrib.get('descr') if docpr is not None else ""
+                            hlink = drawing.find('.//a:hlinkClick', {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                            url = ""
+                            if hlink is not None:
+                                rId = hlink.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                                if rId:
+                                    rel = doc.part.rels.get(rId)
+                                    if rel:
+                                        url = rel.target_ref
+                            img_info = f"이미지: {img_name}, desc: {img_descr}"
+                            if url:
+                                img_info += f", url: {url}"
+                            print(f"[INFO] 이미지 변환: {img_info} in {filename}")
+                            new_doc.add_paragraph(img_info)
+                            img_count += 1
+                        # 테이블/하이퍼링크/이미지에 해당하지 않는 경우 일반 텍스트만 추가
+                        if not links and not img_found:
+                            if para.text.strip():
+                                new_doc.add_paragraph(para.text.strip())
+                        break
+
+        # 저장
+        out_path = os.path.join(output_dir, filename)
+        try:
+            new_doc.save(out_path)
+            print(f"[SUCCESS] 변환된 파일 저장: {out_path}")
+        except Exception as e:
+            print(f"[ERROR] 파일 저장 실패: {out_path}, 에러: {e}")
 
 if __name__ == "__main__":
     main()

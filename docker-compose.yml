@@ -1,7 +1,10 @@
 services:
   # Elasticsearch (기존 설정 재사용)
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    # image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    build:
+      context: . # 프로젝트 루트에서 빌드
+      dockerfile: Dockerfile_esnori
     container_name: rag_elasticsearch
     environment:
       - discovery.type=single-node
@@ -20,6 +23,19 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+
+  # elasticSearch 테스트용 kibana
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: rag_kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - xpack.security.enabled=false
+    ports:
+      - "5601:5601"
+    networks:
+      - "rag_network"
+
 
   # # FastAPI RAG 서버
   # rag-api:

@@ -1,0 +1,4 @@
+# nori 형태소 분석기 포함 이미지 생성을 위한 Dockerfile
+FROM docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+
+RUN elasticsearch-plugin install --batch analysis-nori

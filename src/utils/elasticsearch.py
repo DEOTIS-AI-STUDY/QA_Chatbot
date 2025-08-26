@@ -50,7 +50,7 @@ class ElasticsearchManager:
             "query": {
                 "multi_match": {
                     "query": query,
-                    "fields": ["page_content", "metadata.filename", "metadata.source"],
+                    "fields": ["text", "metadata.filename", "metadata.source"],
                     "type": "best_fields"
                 }
             },
@@ -63,7 +63,7 @@ class ElasticsearchManager:
             for hit in hits:
                 doc = {
                     "score": hit.get("_score"),
-                    "content": hit.get("_source", {}).get("page_content"),
+                    "content": hit.get("_source", {}).get("text"),
                     "metadata": hit.get("_source", {}).get("metadata", {})
                 }
                 results.append(doc)

@@ -6,12 +6,6 @@ import time
 import psutil
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from core.config import LANGSMITH_AVAILABLE
-
-if LANGSMITH_AVAILABLE:
-    from langsmith import Client
-    from langchain.callbacks.tracers import LangChainTracer
-    from langchain.callbacks.manager import CallbackManager
 
 
 class PerformanceTracker:
@@ -126,50 +120,22 @@ class PerformanceTracker:
         return summary
 
 
-def setup_langsmith() -> tuple[Optional[CallbackManager], bool]:
-    """Langsmith 추적 설정"""
-    if not LANGSMITH_AVAILABLE:
-        return None, False
-        
-    try:
-        langsmith_api_key = os.getenv("LANGSMITH_API_KEY")
-        langsmith_project = os.getenv("LANGSMITH_PROJECT", "unified-rag-system")
-        langsmith_endpoint = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
-        
-        if langsmith_api_key:
-            os.environ["LANGCHAIN_TRACING_V2"] = "true"
-            os.environ["LANGCHAIN_ENDPOINT"] = langsmith_endpoint
-            os.environ["LANGCHAIN_API_KEY"] = langsmith_api_key
-            os.environ["LANGCHAIN_PROJECT"] = langsmith_project
-            
-            tracer = LangChainTracer(project_name=langsmith_project)
-            callback_manager = CallbackManager([tracer])
-            return callback_manager, True
-        else:
-            return None, False
-    except Exception as e:
-        print(f"⚠️ Langsmith 설정 중 오류: {str(e)}")
-        return None, False
-
-
 class HybridPerformanceTracker:
     """하이브리드 성능 추적 클래스"""
     
     def __init__(self):
         self.system_tracker = PerformanceTracker()
-        self.langsmith_callback, self.langsmith_enabled = setup_langsmith()
         self.hybrid_metrics = {
             'system_metrics': {},
-            'langsmith_sessions': [],
             'combined_insights': {}
         }
         
     def get_langsmith_status(self) -> Dict[str, Any]:
-        """Langsmith 상태 반환"""
+        """Langsmith 상태 반환 (비활성화됨)"""
         return {
-            'available': LANGSMITH_AVAILABLE,
-            'enabled': self.langsmith_enabled,
-            'project': os.getenv("LANGSMITH_PROJECT", "unified-rag-system")
+            'available': False,
+            'enabled': False,
+            'project': 'disabled'
         }
     
     def track_preprocessing_stage(self, stage_name: str) -> None:
@@ -201,21 +167,14 @@ class HybridPerformanceTracker:
         }
         
         try:
-            if self.langsmith_enabled and self.langsmith_callback:
-                response = qa_chain(
-                    {"query": query}, 
-                    callbacks=self.langsmith_callback.handlers,
-                    metadata=enhanced_metadata
-                )
-            else:
-                response = qa_chain({"query": query})
+            response = qa_chain({"query": query})
             
             system_metrics = self.system_tracker.end_timer("LLM_추론_시스템")
             
             combined_result = {
                 'response': response,
                 'system_metrics': system_metrics,
-                'langsmith_enabled': self.langsmith_enabled,
+                'langsmith_enabled': False,
                 'metadata': enhanced_metadata
             }
             

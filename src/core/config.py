@@ -16,7 +16,6 @@ ELASTICSEARCH_USERNAME = os.getenv("ELASTICSEARCH_USERNAME", None)
 ELASTICSEARCH_PASSWORD = os.getenv("ELASTICSEARCH_PASSWORD", None)
 INDEX_NAME = os.getenv("INDEX_NAME", "unified_rag")
 PDF_DIR = os.getenv("PDF_DIR", "data/pdf")
-LANGCHAIN_ENDPOINT = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
 
 # Elasticsearch URL 자동 구성 (개별 설정이 있으면 우선 사용)
 if not os.getenv("ELASTICSEARCH_URL") and os.getenv("ELASTICSEARCH_HOST"):
@@ -58,15 +57,6 @@ LLM_MODELS = {
 }
 
 # ===== 라이브러리 가용성 확인 =====
-# Langsmith 라이브러리
-try:
-    from langsmith import Client
-    from langchain.callbacks.tracers import LangChainTracer
-    from langchain.callbacks.manager import CallbackManager
-    LANGSMITH_AVAILABLE = True
-except ImportError:
-    LANGSMITH_AVAILABLE = False
-
 # HuggingFace 임베딩 라이브러리
 try:
     from langchain_huggingface import HuggingFaceEmbeddings

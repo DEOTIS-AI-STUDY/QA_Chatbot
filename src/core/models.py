@@ -77,6 +77,21 @@ class ModelFactory:
                 return model, "✅ Gemma3 12B (Ollama) 모델 생성 성공"
             except Exception as e:
                 return None, f"Gemma3 12B (Ollama) 모델 생성 실패: {str(e)}"
+        
+        # Gemma3:27b (Ollama 기반)
+        elif model_choice == "gemma3_big":
+            if not OLLAMA_AVAILABLE:
+                return None, "❌ Ollama 라이브러리가 설치되지 않았습니다. pip install langchain-ollama"
+            try:
+                ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+                model = ChatOllama(
+                    model=LLM_MODELS["gemma3_big"]["model_id"],
+                    temperature=0,
+                    base_url=ollama_base_url
+                )
+                return model, "✅ Gemma3 27B (Ollama) 모델 생성 성공"
+            except Exception as e:
+                return None, f"Gemma3 27B (Ollama) 모델 생성 실패: {str(e)}"
         if model_choice == "upstage":
             if not TRANSFORMERS_AVAILABLE:
                 return None, "❌ Transformers 라이브러리가 설치되지 않았습니다. pip install transformers torch"
@@ -192,6 +207,8 @@ class ModelFactory:
             available_models["solar_10_7b"] = LLM_MODELS["solar_10_7b"]
             if "gemma3" in LLM_MODELS:
                 available_models["gemma3"] = LLM_MODELS["gemma3"]
+            if "gemma3_big" in LLM_MODELS:
+                available_models["gemma3_big"] = LLM_MODELS["gemma3_big"]
         if TRANSFORMERS_AVAILABLE:
             available_models["solar_pro_preview"] = LLM_MODELS["solar_pro_preview"]
         return available_models

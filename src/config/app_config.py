@@ -26,6 +26,15 @@ def load_environment():
         load_dotenv(env_path)
         print(f"🔧 환경 변수 로드: {env_path}")
         print(f"🔗 OLLAMA_BASE_URL: {os.getenv('OLLAMA_BASE_URL', 'Not set')}")
+        
+        # LangSmith 트레이싱 명시적 비활성화
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
+        if "LANGCHAIN_API_KEY" in os.environ:
+            del os.environ["LANGCHAIN_API_KEY"]
+        if "LANGSMITH_API_KEY" in os.environ:
+            del os.environ["LANGSMITH_API_KEY"]
+        print("🚫 LangSmith 트레이싱 비활성화됨")
+        
     except ImportError:
         print("⚠️ python-dotenv가 설치되지 않았습니다. 환경 변수를 수동으로 설정해주세요.")
 

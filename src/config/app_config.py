@@ -191,7 +191,7 @@ class FastAPIRAGSystem:
                 self.refinement_chain = create_llm_chain(
                     self.llm_model, 
                     prompt_for_refined_query,
-                    input_variables=["question", "context"]
+                    input_variables=["userinfo", "question", "context"]
                 )
                 
                 self.qa_chain = create_llm_chain(
@@ -302,19 +302,129 @@ class FastAPIRAGSystem:
                 #         initial_context.append(content)
 
                 # 질문을 알맞게 변경하기위함이기에 history만을 context에 사용
-
-                refined_query_str = self.refinement_chain.run({"question": query, "context": history})
+                userinfo = {
+                    "이름": "홍길동",
+                    "나이": "30세",
+                    "연속득": "75,000,000원",
+                    "사용중인 카드": "BC바로카드"
+                }  # JSON 객체 형태의 사용자 정보
+                
+                refined_query_str = self.refinement_chain.run({"question": query, "context": history, "userinfo": userinfo})
                 print(f"🔍 정제된 질의 (원본): {refined_query_str}")
+                
+                # JSON 또는 마크다운 형태 처리
+                refined_query = query  # 기본값
+                action = None
+                
+                def extract_json_from_markdown(text):
+                    """마크다운에서 JSON 블록 추출"""
+                    import re
+                    # ```json ... ``` 또는 ```  ... ``` 형태의 코드 블록 찾기
+                    json_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+                    match = re.search(json_pattern, text, re.DOTALL | re.IGNORECASE)
+                    if match:
+                        return match.group(1).strip()
+                    return None
+                
+                def parse_refined_query(response_str):
+                    """JSON 또는 마크다운 응답을 파싱하여 refined_query 추출"""
+                    # 1. 직접 JSON 파싱 시도
+                    try:
+                        parsed_json = json.loads(response_str)
+                        return parsed_json.get('refined_query'), parsed_json.get('action')
+                    except json.JSONDecodeError:
+                        pass
+                    
+                    # 2. 마크다운에서 JSON 추출 시도
+                    json_content = extract_json_from_markdown(response_str)
+                    if json_content:
+                        try:
+                            parsed_json = json.loads(json_content)
+                            return parsed_json.get('refined_query'), parsed_json.get('action')
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    # 3. 텍스트에서 직접 추출 시도 (마크다운 텍스트 내용)
+                    # refined_query: 또는 질문: 등의 패턴 찾기
+                    import re
+                    query_patterns = [
+                        r'refined_query[:\s]*([^\n]+)',
+                        r'질문[:\s]*([^\n]+)',
+                        r'정제된\s*질의[:\s]*([^\n]+)',
+                        r'개선된\s*질문[:\s]*([^\n]+)'
+                    ]
+                    
+                    for pattern in query_patterns:
+                        match = re.search(pattern, response_str, re.IGNORECASE)
+                        if match:
+                            extracted_query = match.group(1).strip()
+                            # 따옴표 제거
+                            extracted_query = extracted_query.strip('"\'')
+                            return extracted_query, None
+                    
+                    # 4. action 추출 시도
+                    action_patterns = [
+                        r'action[:\s]*([^\n]+)',
+                        r'동작[:\s]*([^\n]+)'
+                    ]
+                    
+                    extracted_action = None
+                    for pattern in action_patterns:
+                        match = re.search(pattern, response_str, re.IGNORECASE)
+                        if match:
+                            extracted_action = match.group(1).strip().strip('"\'')
+                            break
+                    
+                    return None, extracted_action
+                
                 try:
-                    refined_query_dic = json.loads(refined_query_str)
-                    refined_query = refined_query_dic.get('refined_query')
-                    print(f"🔍 정제된 질의: {refined_query_dic.get('refined_query')}")
-                    if refined_query_dic.get('action') == 'reset':
+                    refined_query, action = parse_refined_query(refined_query_str)
+                    
+                    if refined_query:
+                        print(f"🔍 정제된 질의: {refined_query}")
+                    else:
+                        print(f"🔍 정제된 질의 추출 실패, 원본 질의 사용: {query}")
+                        refined_query = query
+                    
+                    if action == 'reset':
                         # 대화 기록 초기화
                         chat_manager.clear_history()
                         print("🔄 대화 기록 초기화됨")
+                    elif action == 'answer':
+                        # refined_query를 답변으로 사용하고 바로 리턴
+                        processing_time = time.time() - start_time
+                        print(f"🔍 직접 답변 모드: {refined_query}")
+                        
+                        # 대화 기록에 질문과 답변 추가
+                        chat_manager.add_chat(query, refined_query)
+                        
+                        # Langfuse에 결과 로그
+                        if trace and self.langfuse_manager:
+                            self.langfuse_manager.log_generation(
+                                trace_context=trace.get('trace_context'),
+                                name="direct_answer_generation",
+                                input=query,
+                                output=refined_query,
+                                metadata={
+                                    "processing_time": processing_time,
+                                    "mode": "direct_answer",
+                                    "model": self.model_choice
+                                }
+                            )
+                        
+                        return {
+                            "status": "success",
+                            "answer": refined_query,
+                            "query": query,
+                            "refined_query": refined_query,
+                            "session_id": session_id,
+                            "processing_time": processing_time,
+                            "retrieved_docs": []
+                        }
+                        
                 except Exception as e:
-                    print(f"❌ 정제된 질의 JSON 파싱 실패: {str(e)}")
+                    print(f"❌ 정제된 질의 파싱 실패: {str(e)}")
+                    print(f"❌ 응답 내용: {refined_query_str}")
                     refined_query = query
                     chat_manager.clear_history()
                     print("🔄 대화 기록 초기화됨 (파싱 실패)")
@@ -370,10 +480,10 @@ class FastAPIRAGSystem:
                     answer = result.get('answer') or result.get('result') or result.get('text')
                     print(f"🔍 최종 답변: {answer}")
                     # 답변 요약
-                    answer_summary = self.summary_chain.run({"context": answer})
-                    print(f"🔍 답변 요약: {answer_summary}")
+                    # answer_summary = self.summary_chain.run({"context": answer})
+                    # print(f"🔍 답변 요약: {answer_summary}")
                     # 대화 기록에 질문과 답변 추가
-                    chat_manager.add_chat(query, answer_summary)
+                    chat_manager.add_chat(query, answer)
 
                     # Langfuse에 결과 로그
                     if trace and self.langfuse_manager:

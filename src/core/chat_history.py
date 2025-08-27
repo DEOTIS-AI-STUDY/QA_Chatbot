@@ -69,12 +69,9 @@ class ChatHistoryManager:
         history_parts = []
       
         for i, chat in enumerate(recent_history, 1):
-            history_parts.append(f"사용자: {chat['query']}")
-            # 답변은 200자로 제한하여 토큰 사용량 최적화
-            answer_preview = chat['answer'][:200]
-            if len(chat['answer']) > 200:
-                answer_preview += "..."
-            history_parts.append(f"봇: {answer_preview}\n\n")
+                history_parts.append(f"사용자: {chat['query']}")
+                # 답변 전체를 기록에 포함
+                history_parts.append(f"봇: {chat['answer']}\n\n")
    
         return "\n".join(history_parts)
     

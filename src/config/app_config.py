@@ -250,6 +250,44 @@ class FastAPIRAGSystem:
         
         return await asyncio.get_event_loop().run_in_executor(None, _initialize_rag_system)
     
+    def enhance_docs_for_table_preservation(self, merged_docs):
+        """표 구조를 보존하고 LLM의 이해를 돕는 문서 결합 함수"""
+        enhanced_docs = []
+        
+        for i, doc in enumerate(merged_docs):
+            content = getattr(doc, "page_content", str(doc))
+            metadata = getattr(doc, "metadata", {})
+            
+            # 표 포함 여부 확인 (마크다운 표 패턴)
+            has_table = bool(
+                "|" in content and 
+                ("---" in content or ":-:" in content or ":--" in content or "--:" in content)
+            )
+            
+            if has_table:
+                # 표가 포함된 문서는 특별한 마킹과 함께 보존
+                enhanced_content = f"""📊 **표 데이터 문서 #{i+1}** (파일: {metadata.get('filename', 'Unknown')})
+
+    {content.strip()}
+
+    📊 **표 데이터 문서 끝**"""
+            else:
+                # 일반 문서
+                enhanced_content = f"""📄 **참고 문서 #{i+1}**
+    (파일: {metadata.get('filename', 'Unknown')})
+
+    {content.strip()}
+
+    📄 **문서 끝**"""
+            
+            enhanced_docs.append(enhanced_content)
+        
+        # 각 문서 사이에 명확한 구분자를 넣어 결합
+        separator = "\n\n" + "="*50 + " 문서 구분선 " + "="*50 + "\n\n"
+        return separator.join(enhanced_docs)
+
+
+
     async def process_query_async(self, query: str, session_id: str = "default", user_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """질의 처리 (비동기 버전, 의미+키워드 검색 병합)"""
         if not self.is_initialized or not self.rag_chain:
@@ -442,11 +480,13 @@ class FastAPIRAGSystem:
                 merged_docs = self.retriever.get_relevant_documents(refined_query)
                 print(f"🔍 고도화된 하이브리드 검색 결과 개수: {len(merged_docs)}")
 
-                # 문서를 텍스트로 변환
+                # # 문서를 텍스트로 변환
                 docs_text = "\n\n---\n\n".join([
                     getattr(doc, "page_content", str(doc)) for doc in merged_docs
                 ])
                 print(f"🔍 최종 문서 컨텍스트 길이: {len(docs_text)} 문자")
+                # docs_text = self.enhance_docs_for_table_preservation(merged_docs)
+                # print(f"🔍 최종 문서 컨텍스트 길이: {len(docs_text)} 문자")
 
 
                 # 개인 정보 관련 질의인지 판단 // 판단만 하고 아직 쓰진 않음

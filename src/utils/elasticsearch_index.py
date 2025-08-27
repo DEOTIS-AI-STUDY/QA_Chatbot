@@ -259,6 +259,88 @@ class ElasticsearchIndexer:
                 metadata={"source": path, "filename": os.path.basename(path), "category": "DOCX"}
             )]
         return []
+
+    @staticmethod
+    def chunk_pdf_with_md_tables(pages: Document, text_splitter) -> list[Document]:
+        # pages : loaded datas 
+        # file_path, file_type : for metadata
+
+        # 1단계: 표와 텍스트 덩어리를 분리 (향상된 로직)
+        preliminary_chunks = []
+        current_text_buffer = ""
+        current_table_buffer = ""
+        in_table = False
+        metadata_buffer = {}
+
+        for page in pages:
+            lines = page.page_content.split('\n')
+            for line in lines:
+                stripped_line = line.strip()
+                if not stripped_line:
+                    continue
+
+                # Case 1: 줄이 '|'로 시작하는 경우 (표의 시작 또는 새 행)
+                if stripped_line.startswith('|'):
+                    if not in_table:
+                        # 표가 새로 시작되면, 이전까지의 텍스트를 청크로 저장
+                        if current_text_buffer.strip():
+                            preliminary_chunks.append(Document(page_content=current_text_buffer.strip(), metadata=metadata_buffer))
+                        current_text_buffer = ""
+                        in_table = True
+                        metadata_buffer = page.metadata.copy()
+                    
+                    current_table_buffer += stripped_line + "\n"
+                
+                # Case 2: '|'로 시작하지 않지만, 현재 표 내부에 있는 경우
+                elif in_table:
+                    # 테이블 버퍼의 마지막 줄이 '|'로 끝나지 않았다면, 현재 줄은 그 행의 연속임
+                    last_line_in_buffer = current_table_buffer.rstrip('\n').split('\n')[-1]
+                    if last_line_in_buffer and not last_line_in_buffer.endswith('|'):
+                        # 이전 행의 끝(개행문자)을 지우고, 공백과 함께 현재 내용을 이어붙임
+                        current_table_buffer = current_table_buffer.rstrip('\n') + " " + stripped_line + "\n"
+                    else:
+                        # 이전 행이 완성된 행이었다면, 표가 끝난 것으로 간주
+                        if current_table_buffer.strip():
+                            preliminary_chunks.append(Document(page_content=current_table_buffer.strip(), metadata=metadata_buffer))
+                        current_table_buffer = ""
+                        in_table = False
+                        metadata_buffer = page.metadata.copy()
+                        current_text_buffer += line + "\n"
+                
+                # Case 3: 표의 일부가 아닌 일반 텍스트
+                else:
+                    if not metadata_buffer or metadata_buffer.get('page') != page.metadata.get('page'):
+                        metadata_buffer = page.metadata.copy()
+                    current_text_buffer += line + "\n"
+
+        # 루프 종료 후 남아있는 버퍼 처리
+        if current_table_buffer.strip():
+            preliminary_chunks.append(Document(page_content=current_table_buffer.strip(), metadata=metadata_buffer))
+        if current_text_buffer.strip():
+            preliminary_chunks.append(Document(page_content=current_text_buffer.strip(), metadata=metadata_buffer))
+
+        # 2단계: 텍스트 덩어리만 추가 분할
+        final_chunks = []
+
+        exchunk = ""
+        for chunk in preliminary_chunks:
+            # chunk.metadata.update({
+            #                 "source": file_path,
+            #                 "filename": os.path.basename(file_path),
+            #                 "category": file_type
+            #             })
+            if chunk.page_content.strip().startswith('|'):
+                if exchunk != "":
+                    last_line = exchunk.page_content.strip().splitlines()[-1]
+                    chunk.page_content = last_line+'\n' + chunk.page_content
+                final_chunks.append(chunk) # 표는 그대로 추가
+            else:
+                # 텍스트는 잘게 분할하여 추가
+                sub_chunks = text_splitter.create_documents([chunk.page_content], metadatas=[chunk.metadata])
+                final_chunks.extend(sub_chunks)
+            exchunk = chunk
+                
+        return final_chunks
     
     @staticmethod
     def _index_files_by_type(files: List[str], file_type: str, embeddings, hybrid_tracker, 
@@ -286,25 +368,30 @@ class ElasticsearchIndexer:
             
             try:
                 docs = loader_func(file_path)
-                
-                # 텍스트 분할 (표는 분할하지 않음)
+                # this docs will be parameter in chunker
+
                 splitter = get_optimized_text_splitter()
-                for doc in docs:
-                    if "표" in doc.page_content or len(doc.page_content.split('\n')) > 5:
-                        # 표이거나 여러 줄인 경우 분할하지 않음
-                        all_documents.append(doc)
-                    else:
+                if file_type.upper() == "PDF":
+                    chunks = ElasticsearchIndexer.chunk_pdf_with_md_tables(docs, splitter)
+                    all_documents.extend(chunks)
+                else:
+                    for doc in docs:
+                        # if "표" in doc.page_content or len(doc.page_content.split('\n')) > 5:
+                        #     # 표이거나 여러 줄인 경우 분할하지 않음
+                        #     all_documents.append(doc)
+                        # else:
                         # 일반 텍스트는 분할
                         chunks = splitter.split_documents([doc])
                         all_documents.extend(chunks)
-                
-                # 메타데이터 보강
+                    # 메타데이터 보강
                 for doc in all_documents[-len(docs):]:  # 방금 추가된 문서들만
                     doc.metadata.update({
                         "source": file_path,
                         "filename": os.path.basename(file_path),
                         "category": file_type
                     })
+                
+                
                 
             except Exception as e:
                 print(f"{file_type} 파일 처리 오류 ({file_path}): {e}")
@@ -664,12 +751,16 @@ class ElasticsearchIndexer:
                                 "filename": os.path.basename(file_path)
                             })
                         
-                        # 표가 아닌 경우만 분할
-                        if "표" not in doc.page_content:
-                            chunks = splitter.split_documents([doc])
-                            all_documents.extend(chunks)
-                        else:
-                            all_documents.append(doc)
+                        if file_type.lower() != 'pdf':
+                            # 표가 아닌 경우만 분할
+                            if "표" not in doc.page_content:
+                                chunks = splitter.split_documents([doc])
+                                all_documents.extend(chunks)
+                            else:
+                                all_documents.append(doc)
+                    if file_type.lower() == 'pdf':          ### pdf 경우는 따로 md 테이블 chunker로 chunking
+                        chunks = ElasticsearchIndexer.chunk_pdf_with_md_tables(docs,splitter)
+                        all_documents.extend(chunks)
                     
                     processed_files += 1
                     
@@ -1020,3 +1111,4 @@ class ElasticsearchIndexer:
             return docs
         except ImportError:
             return ElasticsearchIndexer._docx_basic_loader(path)
+

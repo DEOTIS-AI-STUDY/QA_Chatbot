@@ -53,6 +53,11 @@ LLM_MODELS = {
         "name": "Gemma3 12B (Ollama)",
         "model_id": "gemma3:12b",
         "api_key_env": None
+    },
+    "gemma3_big": {
+        "name": "Gemma3 27B (Ollama)",
+        "model_id": "gemma3:27b",
+        "api_key_env": None
     }
 }
 

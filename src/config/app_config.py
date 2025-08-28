@@ -387,24 +387,29 @@ class FastAPIRAGSystem:
     def _create_personalized_context(self, docs_text: str, user_data: Dict[str, Any] = None) -> str:
         """사용자 정보 기반 개인화된 컨텍스트 생성"""
         personalized_context = docs_text
-        if user_data and isinstance(user_data, dict):
-            user_context = f"""
-사용자 정보:
-- 이름: {user_data.get('userName', 'N/A')}
-- 나이: {user_data.get('age', 'N/A')}세
-- 연소득: {user_data.get('income', 'N/A')}원
-"""
-            # 보유 카드 정보 추가
-            user_data_obj = user_data.get('data', {})
-            if user_data_obj and isinstance(user_data_obj, dict) and user_data_obj.get('ownCardArr'):
-                user_context += "\n보유 카드:\n"
-                for card in user_data_obj['ownCardArr']:
-                    if isinstance(card, dict):
-                        user_context += f"- {card.get('bank', 'N/A')} {card.get('name', 'N/A')} ({card.get('type', 'N/A')}, 결제일: {card.get('paymentDate', 'N/A')}일)\n"
+#         if user_data and isinstance(user_data, dict):
+#             user_context = f"""
+# ###사용자 정보:
+# - 이름: {user_data.get('userName', 'N/A')}
+# - 연소득: {user_data.get('income', 'N/A')}원
 
-            print(f"🔍 개인화된 컨텍스트: {user_context}")
-            personalized_context = user_context + "\n\n관련 문서:\n" + docs_text
-            print(f"🔍 개인화된 컨텍스트 길이: {len(personalized_context)} 문자")
+# ###검색문서:
+# """
+#             # 보유 카드 정보 추가
+#             user_data_obj = user_data.get('data', {})
+#             if user_data_obj and isinstance(user_data_obj, dict) and user_data_obj.get('ownCardArr'):
+#                 user_context += "\n보유 카드:\n"
+#                 for card in user_data_obj['ownCardArr']:
+#                     if isinstance(card, dict):
+#                         user_context += f"- {card.get('bank', 'N/A')} {card.get('name', 'N/A')} ({card.get('type', 'N/A')}, 결제일: {card.get('paymentDate', 'N/A')}일)\n"
+#             else:
+#                 print(f"� [DEBUG] 카드 정보 없음 또는 조건 불만족")
+
+#             print(f"�🔍 개인화된 컨텍스트: {user_context}")
+#             personalized_context = user_context + "\n\n관련 문서:\n" + docs_text
+#             print(f"🔍 개인화된 컨텍스트 길이: {len(personalized_context)} 문자")
+#         else:
+#             print(f"🐛 [DEBUG] user_data 조건 실패! user_data가 None이거나 dict가 아님")
         
         return personalized_context
 
@@ -439,17 +444,44 @@ class FastAPIRAGSystem:
         def _process_query():
             try:
                 start_time = time.time()
-                trace = self._create_langfuse_trace(session_id, user_data)
+                
+                # user_data가 없거나 유효하지 않은 경우에만 테스트 데이터 사용
+                current_user_data = user_data
+                if not current_user_data or not isinstance(current_user_data, dict):
+                    print("🔧 [DEBUG] user_data가 없어서 기본 테스트 데이터 사용")
+                    current_user_data = {  
+                        "userId": "bccard",  
+                        "userName": "김명정",  
+                        "loginTime": "2025-08-27T14:23:45.123Z",
+                        "isAuthenticated": True,
+                        "age": "27",
+                        "income": "77,511,577",
+                        "data": {
+                            "email": "kmj@deotis.co.kr",
+                            "phone": "010-1234-5678",
+                            "ownCardArr": [
+                                {
+                                    "bank": "우리카드",
+                                    "paymentDate": "4",
+                                    "type": "신용카드"
+                                }
+                            ]
+                        }
+                    }
+                else:
+                    print("🔧 [DEBUG] 전달받은 user_data 사용")
+
+                trace = self._create_langfuse_trace(session_id, current_user_data)
                 
                 # 질의 분석 및 재정의
-                analysis_result = self._analyze_and_refine_query(query, session_id)
-                
+                analysis_result = self._analyze_and_refine_query(query, session_id, current_user_data)
+
                 # DIRECT_ANSWER 처리
                 if analysis_result['action'] == "DIRECT_ANSWER":
                     return self._handle_direct_answer(query, analysis_result, session_id, trace, start_time)
                 
                 # 검색 및 답변 생성
-                return self._handle_search_answer(query, analysis_result, session_id, user_data, trace, start_time)
+                return self._handle_search_answer(query, analysis_result, session_id, current_user_data, trace, start_time)
                 
             except Exception as e:
                 return self._handle_error(e, trace if 'trace' in locals() else None, start_time)
@@ -480,36 +512,16 @@ class FastAPIRAGSystem:
                 metadata=trace_metadata
             )
         return trace
-    
-    def _analyze_and_refine_query(self, query: str, session_id: str) -> Dict[str, Any]:
+
+    def _analyze_and_refine_query(self, query: str, session_id: str, user_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """질의 분석 및 재정의"""
         chat_manager = self.get_chat_manager(session_id)
         history = chat_manager.build_history()
         
         print(f"🔍 대화 기록: {history}")
         print(f"🔍 원본 질의: {query}")
-
-        # 사용자 정보 설정 (하드코딩된 테스트 데이터)
-        userinfo = {  
-            "userId": "bccard",  
-            "userName": "김명정",  
-            "loginTime": "2025-08-27T14:23:45.123Z",
-            "isAuthenticated": True,
-            "income": "77,511,577",
-            "data": {
-                "email": "kmj@deotis.co.kr",
-                "phone": "010-1234-5678",
-                "ownCardArr": [
-                    {
-                        "bank": "SC제일은행",
-                        "paymentDate": "5",
-                        "type": "신용카드"
-                    }
-                ]
-            }
-        }
         
-        userinfo_str = json.dumps(userinfo, ensure_ascii=False, indent=2)
+        userinfo_str = json.dumps(user_data, ensure_ascii=False, indent=2)
         
         try:
             refined_query_str = self.refinement_chain.run({

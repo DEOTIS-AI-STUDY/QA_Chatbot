@@ -371,12 +371,28 @@ class FastAPIRAGSystem:
                     }
                 }  # JSON 객체 형태의 사용자 정보
                 
-                refined_query_str = self.refinement_chain.run({"question": query, "context": history, "userinfo": userinfo})
-                print(f"🔍 정제된 질의 (원본): {refined_query_str}")
+                # userinfo를 JSON 문자열로 변환하여 프롬프트에 전달
+                userinfo_str = json.dumps(userinfo, ensure_ascii=False, indent=2)
                 
-                # JSON 또는 마크다운 형태 처리
-                refined_query = query  # 기본값
-                action = None
+                try:
+                    refined_query_str = self.refinement_chain.run({"question": query, "context": history, "userinfo": userinfo_str})
+                except Exception as chain_error:
+                    print(f"❌ refinement_chain 실행 오류: {str(chain_error)}")
+                    print(f"� 전달된 파라미터:")
+                    print(f"  - question: {query}")
+                    print(f"  - context: {history}")
+                    print(f"  - userinfo (길이): {len(userinfo_str)} 문자")
+                    # 기본값으로 처리 계속
+                    refined_query_str = query
+                    
+                print(f"🔍 질의 분석 결과 (원본): {refined_query_str}")
+                
+                # 기본값 설정
+                refined_query = query
+                action = "SEARCH"
+                classification = "GENERAL"
+                is_new_topic = True
+                reasoning = ""
                 
                 def extract_json_from_markdown(text):
                     """마크다운에서 JSON 블록 추출"""
@@ -388,12 +404,18 @@ class FastAPIRAGSystem:
                         return match.group(1).strip()
                     return None
                 
-                def parse_refined_query(response_str):
-                    """JSON 또는 마크다운 응답을 파싱하여 refined_query 추출"""
+                def parse_query_analysis(response_str):
+                    """새로운 JSON 응답 형식을 파싱"""
                     # 1. 직접 JSON 파싱 시도
                     try:
                         parsed_json = json.loads(response_str)
-                        return parsed_json.get('refined_query'), parsed_json.get('action')
+                        return (
+                            parsed_json.get('refined_query'),
+                            parsed_json.get('action'),
+                            parsed_json.get('classification'),
+                            parsed_json.get('is_new_topic'),
+                            parsed_json.get('reasoning')
+                        )
                     except json.JSONDecodeError:
                         pass
                     
@@ -402,63 +424,87 @@ class FastAPIRAGSystem:
                     if json_content:
                         try:
                             parsed_json = json.loads(json_content)
-                            return parsed_json.get('refined_query'), parsed_json.get('action')
+                            return (
+                                parsed_json.get('refined_query'),
+                                parsed_json.get('action'),
+                                parsed_json.get('classification'),
+                                parsed_json.get('is_new_topic'),
+                                parsed_json.get('reasoning')
+                            )
                         except json.JSONDecodeError:
                             pass
                     
-                    # 3. 텍스트에서 직접 추출 시도 (마크다운 텍스트 내용)
-                    # refined_query: 또는 질문: 등의 패턴 찾기
+                    # 3. 텍스트에서 직접 추출 시도 (fallback)
                     import re
-                    query_patterns = [
-                        r'refined_query[:\s]*([^\n]+)',
-                        r'질문[:\s]*([^\n]+)',
-                        r'정제된\s*질의[:\s]*([^\n]+)',
-                        r'개선된\s*질문[:\s]*([^\n]+)'
-                    ]
                     
-                    for pattern in query_patterns:
-                        match = re.search(pattern, response_str, re.IGNORECASE)
-                        if match:
-                            extracted_query = match.group(1).strip()
-                            # 따옴표 제거
-                            extracted_query = extracted_query.strip('"\'')
-                            return extracted_query, None
+                    # refined_query 추출
+                    query_match = re.search(r'refined_query["\s:]*([^,\n}]+)', response_str, re.IGNORECASE)
+                    extracted_query = query_match.group(1).strip().strip('"\'') if query_match else None
                     
-                    # 4. action 추출 시도
-                    action_patterns = [
-                        r'action[:\s]*([^\n]+)',
-                        r'동작[:\s]*([^\n]+)'
-                    ]
+                    # action 추출
+                    action_match = re.search(r'action["\s:]*([^,\n}]+)', response_str, re.IGNORECASE)
+                    extracted_action = action_match.group(1).strip().strip('"\'') if action_match else None
                     
-                    extracted_action = None
-                    for pattern in action_patterns:
-                        match = re.search(pattern, response_str, re.IGNORECASE)
-                        if match:
-                            extracted_action = match.group(1).strip().strip('"\'')
-                            break
+                    # classification 추출
+                    class_match = re.search(r'classification["\s:]*([^,\n}]+)', response_str, re.IGNORECASE)
+                    extracted_class = class_match.group(1).strip().strip('"\'') if class_match else None
                     
-                    return None, extracted_action
+                    # is_new_topic 추출
+                    topic_match = re.search(r'is_new_topic["\s:]*([^,\n}]+)', response_str, re.IGNORECASE)
+                    extracted_topic = None
+                    if topic_match:
+                        topic_str = topic_match.group(1).strip().strip('"\'').lower()
+                        extracted_topic = topic_str == 'true'
+                    
+                    # reasoning 추출
+                    reason_match = re.search(r'reasoning["\s:]*([^}]+)', response_str, re.IGNORECASE)
+                    extracted_reason = reason_match.group(1).strip().strip('"\'') if reason_match else None
+                    
+                    return extracted_query, extracted_action, extracted_class, extracted_topic, extracted_reason
                 
                 try:
-                    refined_query, action = parse_refined_query(refined_query_str)
+                    parsed_refined_query, parsed_action, parsed_classification, parsed_is_new_topic, parsed_reasoning = parse_query_analysis(refined_query_str)
                     
-                    if refined_query:
+                    # 파싱된 값들을 안전하게 적용
+                    if parsed_refined_query:
+                        refined_query = parsed_refined_query
                         print(f"🔍 정제된 질의: {refined_query}")
                     else:
                         print(f"🔍 정제된 질의 추출 실패, 원본 질의 사용: {query}")
-                        refined_query = query
                     
-                    if action == 'reset':
-                        # 대화 기록 초기화
+                    if parsed_action in ["SEARCH", "DIRECT_ANSWER"]:
+                        action = parsed_action
+                        print(f"📋 처리 방식: {action}")
+                    
+                    if parsed_classification in ["GENERAL", "HYBRID", "USER_INFO_ONLY"]:
+                        classification = parsed_classification
+                        print(f"🏷️ 질의 분류: {classification}")
+                    
+                    if parsed_is_new_topic is not None:
+                        is_new_topic = parsed_is_new_topic
+                        print(f"🆕 새로운 주제: {is_new_topic}")
+                    
+                    if parsed_reasoning:
+                        reasoning = parsed_reasoning
+                        print(f"💭 분석 근거: {reasoning}")
+                    
+                    # 새로운 주제인 경우 대화 기록 초기화
+                    if is_new_topic:
                         chat_manager.clear_history()
-                        print("🔄 대화 기록 초기화됨")
-                    elif action == 'answer':
-                        # refined_query를 답변으로 사용하고 바로 리턴
+                        print("🔄 대화 기록 초기화됨 (새로운 주제)")
+                    
+                    # DIRECT_ANSWER 액션 처리
+                    if action == "DIRECT_ANSWER":
+                        # 사용자 정보를 기반으로 직접 답변 생성
                         processing_time = time.time() - start_time
-                        print(f"🔍 직접 답변 모드: {refined_query}")
+                        
+                        # 사용자 정보에서 답변 생성
+                        direct_answer = self.generate_direct_answer_from_user_info(refined_query, userinfo)
+                        
+                        print(f"🔍 직접 답변 모드: {direct_answer}")
                         
                         # 대화 기록에 질문과 답변 추가
-                        chat_manager.add_chat(query, refined_query)
+                        chat_manager.add_chat(query, direct_answer)
                         
                         # Langfuse에 결과 로그
                         if trace and self.langfuse_manager:
@@ -466,30 +512,34 @@ class FastAPIRAGSystem:
                                 trace_context=trace.get('trace_context'),
                                 name="direct_answer_generation",
                                 input=query,
-                                output=refined_query,
+                                output=direct_answer,
                                 metadata={
                                     "processing_time": processing_time,
                                     "mode": "direct_answer",
+                                    "classification": classification,
                                     "model": self.model_choice
                                 }
                             )
                         
                         return {
                             "status": "success",
-                            "answer": refined_query,
+                            "answer": direct_answer,
                             "query": query,
                             "refined_query": refined_query,
+                            "classification": classification,
+                            "action": action,
                             "session_id": session_id,
                             "processing_time": processing_time,
                             "retrieved_docs": []
                         }
                         
                 except Exception as e:
-                    print(f"❌ 정제된 질의 파싱 실패: {str(e)}")
+                    print(f"❌ 질의 분석 파싱 실패: {str(e)}")
                     print(f"❌ 응답 내용: {refined_query_str}")
                     refined_query = query
-                    chat_manager.clear_history()
-                    print("🔄 대화 기록 초기화됨 (파싱 실패)")
+                    action = "SEARCH"
+                    classification = "GENERAL"
+                    print("🔄 기본값으로 처리 진행")
 
                 # 고도화된 하이브리드 검색 (시맨틱 + 키워드 + 스코어링이 모두 포함됨)
                 merged_docs = self.retriever.get_relevant_documents(refined_query)
@@ -577,6 +627,8 @@ class FastAPIRAGSystem:
                         "answer": answer,
                         "query": query,
                         "refined_query": refined_query,
+                        "classification": classification,
+                        "action": action,
                         "session_id": session_id,
                         "username": user_data.get("userName", "") if user_data and isinstance(user_data, dict) else "",  # 사용자 데이터 포함
                         "processing_time": processing_time,
@@ -619,6 +671,116 @@ class FastAPIRAGSystem:
                 }
 
         return await asyncio.get_event_loop().run_in_executor(None, _process_query)
+    
+    def generate_direct_answer_from_user_info(self, refined_query: str, userinfo: Dict[str, Any]) -> str:
+        """사용자 정보만을 사용하여 직접 답변 생성"""
+        try:
+            # 사용자 정보에서 답변 가능한 정보 추출
+            user_data = userinfo.get('data', {})
+            
+            # 카드 관련 질의 처리
+            if any(keyword in refined_query.lower() for keyword in ['카드', '결제일', '결제일자', 'paymentdate']):
+                cards = user_data.get('ownCardArr', [])
+                if cards:
+                    card_info = []
+                    for card in cards:
+                        bank = card.get('bank', '알 수 없음')
+                        name = card.get('name', '알 수 없음')
+                        payment_date = card.get('paymentDate', '알 수 없음')
+                        card_type = card.get('type', '알 수 없음')
+                        
+                        if '결제일' in refined_query.lower():
+                            card_info.append(f"{bank} {name} ({card_type}): 매월 {payment_date}일")
+                        else:
+                            card_info.append(f"{bank} {name} ({card_type}): 결제일 {payment_date}일")
+                    
+                    if len(card_info) == 1:
+                        return f"고객님의 카드 정보는 다음과 같습니다.\n\n{card_info[0]}"
+                    else:
+                        return f"고객님의 카드 정보는 다음과 같습니다.\n\n" + "\n".join(f"{i+1}. {info}" for i, info in enumerate(card_info))
+                else:
+                    return "등록된 카드 정보가 없습니다."
+            
+            # 개인정보 관련 질의 처리
+            elif any(keyword in refined_query.lower() for keyword in ['이름', 'name', '성함']):
+                user_name = userinfo.get('userName', '정보 없음')
+                return f"고객님의 성함은 {user_name}입니다."
+            
+            elif any(keyword in refined_query.lower() for keyword in ['나이', 'age', '연령']):
+                age = userinfo.get('age', '정보 없음')
+                return f"고객님의 나이는 {age}세입니다."
+            
+            elif any(keyword in refined_query.lower() for keyword in ['소득', 'income', '연봉']):
+                income = userinfo.get('income', '정보 없음')
+                if income != '정보 없음':
+                    # 숫자를 천 단위로 구분
+                    try:
+                        income_formatted = f"{int(income):,}원"
+                        return f"고객님의 소득 정보는 {income_formatted}입니다."
+                    except:
+                        return f"고객님의 소득 정보는 {income}원입니다."
+                else:
+                    return "소득 정보가 등록되어 있지 않습니다."
+            
+            elif any(keyword in refined_query.lower() for keyword in ['이메일', 'email', '메일']):
+                email = user_data.get('email', '정보 없음')
+                return f"고객님의 이메일은 {email}입니다."
+            
+            elif any(keyword in refined_query.lower() for keyword in ['전화번호', 'phone', '휴대폰', '연락처']):
+                phone = user_data.get('phone', '정보 없음')
+                return f"고객님의 전화번호는 {phone}입니다."
+            
+            elif any(keyword in refined_query.lower() for keyword in ['사용자', 'userid', '아이디']):
+                user_id = userinfo.get('userId', '정보 없음')
+                return f"고객님의 사용자 ID는 {user_id}입니다."
+            
+            # 전체 정보 요청
+            elif any(keyword in refined_query.lower() for keyword in ['전체', '모든', '내정보', '정보']):
+                info_parts = []
+                
+                # 기본 정보
+                info_parts.append(f"**고객 정보**")
+                info_parts.append(f"- 성함: {userinfo.get('userName', '정보 없음')}")
+                info_parts.append(f"- 나이: {userinfo.get('age', '정보 없음')}세")
+                
+                income = userinfo.get('income', '정보 없음')
+                if income != '정보 없음':
+                    try:
+                        income_formatted = f"{int(income):,}원"
+                        info_parts.append(f"- 소득: {income_formatted}")
+                    except:
+                        info_parts.append(f"- 소득: {income}원")
+                else:
+                    info_parts.append(f"- 소득: {income}")
+                
+                # 연락처 정보
+                if 'email' in user_data or 'phone' in user_data:
+                    info_parts.append(f"\n**연락처 정보**")
+                    if 'email' in user_data:
+                        info_parts.append(f"- 이메일: {user_data['email']}")
+                    if 'phone' in user_data:
+                        info_parts.append(f"- 전화번호: {user_data['phone']}")
+                
+                # 카드 정보
+                cards = user_data.get('ownCardArr', [])
+                if cards:
+                    info_parts.append(f"\n**보유 카드**")
+                    for i, card in enumerate(cards, 1):
+                        bank = card.get('bank', '알 수 없음')
+                        name = card.get('name', '알 수 없음')
+                        payment_date = card.get('paymentDate', '알 수 없음')
+                        card_type = card.get('type', '알 수 없음')
+                        info_parts.append(f"{i}. {bank} {name} ({card_type}) - 결제일: {payment_date}일")
+                
+                return "\n".join(info_parts)
+            
+            # 처리할 수 없는 질의
+            else:
+                return f"죄송하지만 '{refined_query}'에 대한 정보를 사용자 정보에서 찾을 수 없습니다. 더 구체적인 질문을 해주시거나, 다른 방식으로 문의해 주세요."
+                
+        except Exception as e:
+            print(f"❌ 직접 답변 생성 오류: {str(e)}")
+            return "사용자 정보 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
     
     def get_system_info(self) -> Dict[str, Any]:
         """시스템 정보 반환"""

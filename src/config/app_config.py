@@ -492,13 +492,13 @@ class FastAPIRAGSystem:
                     
                     # DIRECT_ANSWER 액션 처리
                     if action == "DIRECT_ANSWER":
-                        # 사용자 정보를 기반으로 직접 답변 생성
+                        # refined_query에 이미 완전한 답변이 생성되어 있음
                         processing_time = time.time() - start_time
                         
-                        # 사용자 정보에서 답변 생성
-                        direct_answer = self.generate_direct_answer_from_user_info(refined_query, userinfo)
+                        # refined_query를 바로 답변으로 사용
+                        direct_answer = refined_query
                         
-                        print(f"🔍 직접 답변 모드: {direct_answer}")
+                        print(f"🔍 직접 답변 모드 (프롬프트 생성): {direct_answer}")
                         
                         # 대화 기록에 질문과 답변 추가
                         chat_manager.add_chat(query, direct_answer)

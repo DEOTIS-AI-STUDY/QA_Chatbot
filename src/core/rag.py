@@ -418,7 +418,6 @@ prompt_for_refined_query = """
 **[사용자 정보]**는 아래 JSON 형태로 입력됩니다. 예시에서 card 정보가 여러 개 존재하는 경우 ownCardArr 배열에 여러 카드 정보가 포함될 수 있습니다.
 
 {
-  "user_data": {
     "userId": "bccard",
     "userName": "김명정",
     "loginTime": "2025-08-27T14:23:45.123Z",
@@ -426,20 +425,20 @@ prompt_for_refined_query = """
     "age": "27",
     "income": "77,511,577",
     "data": {
-      "email": "kmj@deotis.co.kr",
-      "phone": "010-1234-5678",
-      "ownCardArr": [
+        "email": "kmj@deotis.co.kr",
+        "phone": "010-1234-5678",
+        "ownCardArr": [
         {
-          "bank": "우리카드",
-          "name": "VVIP 카드",
-          "paymentDate": "4",
-          "ipn": "VISA",
-          "type": "신용카드"
+            "bank": "우리카드",
+            "name": "VVIP 카드",
+            "paymentDate": "4",
+            "ipn": "VISA",
+            "type": "신용카드"
         }
-      ]
+        ]
     }
-  }
 }
+
 
 ---
 
@@ -447,7 +446,6 @@ prompt_for_refined_query = """
 
 **# 예시 1: GENERAL (새로운 주제)**
 - **사용자 정보**: {
-  "user_data": {
     ...
     "data": {
       ...
@@ -456,7 +454,6 @@ prompt_for_refined_query = """
       ]
     }
   }
-}
 - **대화 기록**: "사용자: 우리카드 혜택 알려줘 / 어시스턴트: 네, 우리카드는..."
 - **최신 사용자 질문**: "하나카드 발급 절차 알려줘"
 - **결과**:
@@ -470,7 +467,6 @@ prompt_for_refined_query = """
 
 **# 예시 2: HYBRID(맥락 유지)**
 - **사용자 정보**: {
-  "user_data": {
     ...
     "data": {
       ...
@@ -479,7 +475,6 @@ prompt_for_refined_query = """
       ]
     }
   }
-}
 - **대화 기록**: "사용자: 우리카드 혜택 알려줘 / 어시스턴트: 네, 우리카드는..."
 - **최신 사용자 질문**: "내 카드의 결제일자와 이용기간을 알려줘"
 - **결과**:
@@ -493,7 +488,6 @@ prompt_for_refined_query = """
 
 **# 예시 3**
 - **사용자 정보**: {
-  "user_data": {
     ...
     "data": {
       ...
@@ -502,7 +496,6 @@ prompt_for_refined_query = """
       ]
     }
   }
-}
 - **대화 기록**: "사용자: 우리카드 혜택 알려줘 / 어시스턴트: 네, 우리카드는..."
 - **최신 사용자 질문**: "내 카드 결제일자 알려줘"
 - **결과**:

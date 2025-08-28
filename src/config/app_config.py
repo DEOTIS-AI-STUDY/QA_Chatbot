@@ -349,11 +349,26 @@ class FastAPIRAGSystem:
                 #         initial_context.append(content)
 
                 # 질문을 알맞게 변경하기위함이기에 history만을 context에 사용
-                userinfo = {
-                    "이름": "홍길동",
-                    "나이": "30세",
-                    "연속득": "75,000,000원",
-                    "사용중인 카드": "BC바로카드"
+                userinfo = {  
+                    "userId": "bccard",  
+                    "userName": "김명정",  
+                    "loginTime": "2025-08-27T14:23:45.123Z",
+                    "isAuthenticated": True, # python에서 true -> True 로 치환됨
+                    "age": "27",
+                    "income": "77,511,577",
+                    "data": {
+                        "email": "kmj@deotis.co.kr",
+                        "phone": "010-1234-5678",
+                        "ownCardArr": [
+                            {
+                                "bank": "우리카드",
+                                "name": "VVIP 카드",
+                                "paymentDate": "4",
+                                "ipn": "VISA",
+                                "type": "신용카드"
+                            }
+                        ]
+                    }
                 }  # JSON 객체 형태의 사용자 정보
                 
                 refined_query_str = self.refinement_chain.run({"question": query, "context": history, "userinfo": userinfo})

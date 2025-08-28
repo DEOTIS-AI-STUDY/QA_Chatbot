@@ -354,7 +354,6 @@ class FastAPIRAGSystem:
                     "userName": "김명정",  
                     "loginTime": "2025-08-27T14:23:45.123Z",
                     "isAuthenticated": True, # python에서 true -> True 로 치환됨
-                    "age": "27",
                     "income": "77,511,577",
                     "data": {
                         "email": "kmj@deotis.co.kr",
@@ -362,9 +361,7 @@ class FastAPIRAGSystem:
                         "ownCardArr": [
                             {
                                 "bank": "우리카드",
-                                "name": "VVIP 카드",
                                 "paymentDate": "4",
-                                "ipn": "VISA",
                                 "type": "신용카드"
                             }
                         ]
@@ -528,6 +525,7 @@ class FastAPIRAGSystem:
                             "refined_query": refined_query,
                             "classification": classification,
                             "action": action,
+                            "reasoning": reasoning,
                             "session_id": session_id,
                             "processing_time": processing_time,
                             "retrieved_docs": []
@@ -629,6 +627,7 @@ class FastAPIRAGSystem:
                         "refined_query": refined_query,
                         "classification": classification,
                         "action": action,
+                        "reasoning": reasoning,
                         "session_id": session_id,
                         "username": user_data.get("userName", "") if user_data and isinstance(user_data, dict) else "",  # 사용자 데이터 포함
                         "processing_time": processing_time,

@@ -461,13 +461,52 @@ class ElasticsearchIndexer:
             es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
             if not success:
                 raise Exception(f"Elasticsearch 연결 실패: {message}")
-            
+            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+            DICT_DIR = os.path.join(BASE_DIR, "..", "..", "data", "dict")
+            DICT_DIR = os.path.normpath(DICT_DIR)  # 경로 정규화
+
+            # print(DICT_DIR)
+            # === 사용자 사전 로드 ===
+            with open(os.path.join(DICT_DIR, "userdict.txt"), encoding="utf-8") as f:
+                userdict_rules = [line.strip() for line in f if line.strip()]
+
+            # === 동의어 사전 로드 ===
+            with open(os.path.join(DICT_DIR, "synonyms.txt"), encoding="utf-8") as f:
+                synonyms_rules = [line.strip() for line in f if line.strip()]
+
             mapping = {
-                "mappings":{
-                    "properties":{
-                        "text":{
-                            "type":"text",
-                            "analyzer":"nori"
+                "settings": {
+                    "analysis": {
+                        "tokenizer": {
+                            "nori_user_dict": {
+                                "type": "nori_tokenizer",
+                                "decompound_mode": "mixed",
+                                "user_dictionary_rules": userdict_rules
+                            }
+                        },
+                        "analyzer": {
+                            "ko_search": {
+                                "type": "custom",
+                                "tokenizer": "nori_user_dict",
+                                "filter": ["lowercase", "ko_synonym"]
+                            }
+                        },
+                        "filter": {
+                            "ko_synonym": {
+                                "type": "synonym_graph",
+                                "expand": True,
+                                "lenient": True,
+                                "synonyms": synonyms_rules
+                            }
+                        }
+                    }
+                },
+                "mappings": {
+                    "properties": {
+                        "text": {
+                            "type": "text",
+                            "analyzer": "ko_search"
                         }
                     }
                 }

@@ -1,0 +1,15 @@
+우리카드     NNP
+BC바로카드   NNP
+SC제일은행   NNP
+하나카드     NNP
+NH농협카드   NNP
+IBK기업은행  NNP
+KB국민카드   NNP
+iM뱅크       NNP
+BNK부산은행  NNP
+BNK경남은행  NNP
+한국씨티은행  NNP
+신한카드     NNP
+수협카드     NNP
+국내단기카드대출
+해외이용거래

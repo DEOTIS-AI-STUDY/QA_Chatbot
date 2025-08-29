@@ -277,41 +277,82 @@ class FastAPIRAGSystem:
     # 문서 처리 및 검색 유틸리티
     # =============================================================================
     
-    def enhance_docs_for_table_preservation(self, merged_docs):
-        """표 구조를 보존하고 LLM의 이해를 돕는 문서 결합 함수"""
-        enhanced_docs = []
+    def convert_docs_with_table_preservation(self, merged_docs):
+        """표 구조를 보존하는 고급 문서 변환"""
+        enhanced_sections = []
         
         for i, doc in enumerate(merged_docs):
             content = getattr(doc, "page_content", str(doc))
             metadata = getattr(doc, "metadata", {})
             
-            # 표 포함 여부 확인 (마크다운 표 패턴)
-            has_table = bool(
-                "|" in content and 
-                ("---" in content or ":-:" in content or ":--" in content or "--:" in content)
-            )
+            # 문서 헤더 정보
+            doc_header = f"""
+    📄 **문서 {i+1}**: {metadata.get('filename', '알 수 없는 파일')}
+    📊 **페이지**: {metadata.get('page_number', 'N/A')}
+    🏷️ **카테고리**: {metadata.get('category', '일반')}
+    ⭐ **관련성 점수**: {getattr(doc, '_score', 'N/A')}
+    """
             
-            if has_table:
-                # 표가 포함된 문서는 특별한 마킹과 함께 보존
-                enhanced_content = f"""📊 **표 데이터 문서 #{i+1}** (파일: {metadata.get('filename', 'Unknown')})
+            # 표 포함 여부 확인 및 처리
+            if self._has_table_structure(content):
+                processed_content = self._preserve_table_structure(content)
+                doc_section = f"""{doc_header}
+    📊 **[표 데이터 포함 문서]**
 
-    {content.strip()}
+    {processed_content}
 
-    📊 **표 데이터 문서 끝**"""
+    📊 **[표 데이터 끝]**
+    """
             else:
-                # 일반 문서
-                enhanced_content = f"""📄 **참고 문서 #{i+1}**
-    (파일: {metadata.get('filename', 'Unknown')})
+                doc_section = f"""{doc_header}
+    📝 **[일반 텍스트 문서]**
 
     {content.strip()}
 
-    📄 **문서 끝**"""
+    📝 **[문서 끝]**
+    """
             
-            enhanced_docs.append(enhanced_content)
+            enhanced_sections.append(doc_section)
         
-        # 각 문서 사이에 명확한 구분자를 넣어 결합
-        separator = "\n\n" + "="*50 + " 문서 구분선 " + "="*50 + "\n\n"
-        return separator.join(enhanced_docs)
+        return "\n\n" + "="*80 + "\n\n".join(enhanced_sections)
+
+    def _has_table_structure(self, content):
+        """표 구조 포함 여부 확인"""
+        table_indicators = [
+            "|" in content and ("---" in content or ":-:" in content),
+            content.count("\t") > 5,  # 탭으로 구분된 표
+            re.search(r'\d+\.\s+.*?\s+\d+', content),  # 번호 + 텍스트 + 숫자 패턴
+        ]
+        return any(table_indicators)
+
+    def _preserve_table_structure(self, content):
+        """표 구조 보존 처리"""
+        # 마크다운 표 형태로 변환
+        if "|" in content:
+            return self._format_markdown_table(content)
+        
+        # 탭 구분 표를 마크다운으로 변환
+        if "\t" in content:
+            return self._convert_tab_to_markdown(content)
+        
+        # 일반 텍스트를 구조화된 형태로 변환
+        return self._structure_plain_text_table(content)
+
+    def _format_markdown_table(self, content):
+        """마크다운 표 형식 정리"""
+        lines = content.split('\n')
+        table_lines = []
+        
+        for line in lines:
+            if '|' in line:
+                # 표 라인 정리 및 포맷팅
+                cells = [cell.strip() for cell in line.split('|')]
+                formatted_line = "| " + " | ".join(cells) + " |"
+                table_lines.append(formatted_line)
+            elif line.strip():
+                table_lines.append(line)
+        
+        return '\n'.join(table_lines)
 
     # =============================================================================
     # 질의 분석 및 처리 유틸리티
@@ -622,6 +663,9 @@ class FastAPIRAGSystem:
         docs_text = "\n\n---\n\n".join([
             getattr(doc, "page_content", str(doc)) for doc in merged_docs
         ])
+        # 문서 텍스트 변환 다른 시도
+        # docs_text = self.convert_docs_with_table_preservation(merged_docs)
+
         print(f"🔍 최종 문서 컨텍스트 길이: {len(docs_text)} 문자")
 
         # 개인화된 컨텍스트 생성

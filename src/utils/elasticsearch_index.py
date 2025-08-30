@@ -261,86 +261,133 @@ class ElasticsearchIndexer:
         return []
 
     @staticmethod
-    def chunk_pdf_with_md_tables(pages: Document, text_splitter) -> list[Document]:
-        # pages : loaded datas 
-        # file_path, file_type : for metadata
+    def chunk_pdf_with_md_tables(pages: list[Document], text_splitter) -> list[Document]:
 
-        # 1단계: 표와 텍스트 덩어리를 분리 (향상된 로직)
+        def last_n_lines(text: str, n: int = 5) -> str:
+            lines = text.splitlines()
+            last_n = lines[-n:]
+            # 표 줄('|')로 시작하는 것은 제외
+            filtered = [line for line in last_n if not line.strip().startswith("|")]
+
+            return "\n".join(filtered)
+        
+        
+        # 1단계: 페이지 경계를 인지하며 '페이지-텍스트 청크'와 '표 청크'로 순차 분리
         preliminary_chunks = []
-        current_text_buffer = ""
-        current_table_buffer = ""
+        current_page_text_chunk = None # 현재 페이지의 텍스트를 누적하는 Document
+        
+        # 표 처리를 위한 상태 변수
         in_table = False
-        metadata_buffer = {}
+        column_count = 0
+        current_row_buffer = ""
+        current_table_buffer = ""
+        table_metadata = {}
 
         for page in pages:
-            lines = page.page_content.split('\n')
-            for line in lines:
+            # --- 페이지가 바뀌면, 이전 페이지에서 작업 중이던 텍스트 청크를 확정 ---
+            if current_page_text_chunk:
+                preliminary_chunks.append(current_page_text_chunk)
+                current_page_text_chunk = None
+
+            for line_num, line in enumerate(page.page_content.split('\n')):
                 stripped_line = line.strip()
                 if not stripped_line:
                     continue
 
-                # Case 1: 줄이 '|'로 시작하는 경우 (표의 시작 또는 새 행)
-                if stripped_line.startswith('|'):
-                    if not in_table:
-                        # 표가 새로 시작되면, 이전까지의 텍스트를 청크로 저장
-                        if current_text_buffer.strip():
-                            preliminary_chunks.append(Document(page_content=current_text_buffer.strip(), metadata=metadata_buffer))
-                        current_text_buffer = ""
-                        in_table = True
-                        metadata_buffer = page.metadata.copy()
-                    
-                    current_table_buffer += stripped_line + "\n"
-                
-                # Case 2: '|'로 시작하지 않지만, 현재 표 내부에 있는 경우
-                elif in_table:
-                    # 테이블 버퍼의 마지막 줄이 '|'로 끝나지 않았다면, 현재 줄은 그 행의 연속임
-                    last_line_in_buffer = current_table_buffer.rstrip('\n').split('\n')[-1]
-                    if last_line_in_buffer and not last_line_in_buffer.endswith('|'):
-                        # 이전 행의 끝(개행문자)을 지우고, 공백과 함께 현재 내용을 이어붙임
-                        current_table_buffer = current_table_buffer.rstrip('\n') + " " + stripped_line + "\n"
+                is_table_line = stripped_line.startswith('|')
+
+                if in_table:
+                    # --- 현재 표를 처리 중인 경우 ---
+                    if is_table_line:
+                        current_table_buffer += current_row_buffer + "\n"
+                        current_row_buffer = stripped_line
                     else:
-                        # 이전 행이 완성된 행이었다면, 표가 끝난 것으로 간주
-                        if current_table_buffer.strip():
-                            preliminary_chunks.append(Document(page_content=current_table_buffer.strip(), metadata=metadata_buffer))
-                        current_table_buffer = ""
-                        in_table = False
-                        metadata_buffer = page.metadata.copy()
-                        current_text_buffer += line + "\n"
+                        is_row_complete = current_row_buffer.count('|') >= column_count + 1
+                        if is_row_complete:
+                            # --- 표의 끝 ---
+                            current_table_buffer += current_row_buffer + "\n"
+                            if current_table_buffer.strip():
+                                table_doc = Document(page_content=current_table_buffer.strip(), metadata=table_metadata)
+                                preliminary_chunks.append(table_doc)
+                            
+                            in_table = False
+                            current_table_buffer = ""
+                            current_row_buffer = ""
+                            is_table_line = False # 현재 라인은 텍스트이므로 상태 변경
+                        else:
+                            current_row_buffer += " " + stripped_line
+                            continue
                 
-                # Case 3: 표의 일부가 아닌 일반 텍스트
-                else:
-                    if not metadata_buffer or metadata_buffer.get('page') != page.metadata.get('page'):
-                        metadata_buffer = page.metadata.copy()
-                    current_text_buffer += line + "\n"
+                if not in_table:
+                    # --- 현재 텍스트를 처리 중인 경우 ---
+                    if is_table_line:
+                        # --- 텍스트가 끝나고 표가 시작됨 ---
+                        # 1. 이전까지 누적된 텍스트 청크가 있으면 최종 리스트에 추가
+                        if current_page_text_chunk:
+                            preliminary_chunks.append(current_page_text_chunk)
+                            current_page_text_chunk = None
+                        
+                        # 2. 표 처리 시작
+                        in_table = True
+                        table_metadata = page.metadata.copy()
+                        table_metadata['start_line'] = line_num
+                        columns = [s for s in stripped_line.split('|') if s.strip()]
+                        column_count = len(columns)
+                        table_metadata['column'] = columns
+                        current_row_buffer = stripped_line
+                    else:
+                        # --- 일반 텍스트 계속 ---
+                        if current_page_text_chunk is None:
+                            metadata = page.metadata.copy()
+                            metadata['start_line'] = line_num
+                            current_page_text_chunk = Document(page_content=line + "\n", metadata=metadata)
+                        else:
+                            current_page_text_chunk.page_content += line + "\n"
 
-        # 루프 종료 후 남아있는 버퍼 처리
-        if current_table_buffer.strip():
-            preliminary_chunks.append(Document(page_content=current_table_buffer.strip(), metadata=metadata_buffer))
-        if current_text_buffer.strip():
-            preliminary_chunks.append(Document(page_content=current_text_buffer.strip(), metadata=metadata_buffer))
-
-        # 2단계: 텍스트 덩어리만 추가 분할
+        # 루프 종료 후 남아있는 마지막 청크 처리
+        if current_page_text_chunk:
+            preliminary_chunks.append(current_page_text_chunk)
+        if current_table_buffer.strip() or current_row_buffer.strip():
+            current_table_buffer += current_row_buffer + "\n"
+            table_doc = Document(page_content=current_table_buffer.strip(), metadata=table_metadata)
+            preliminary_chunks.append(table_doc)
+        
+        # 2단계: '예비 청크 리스트'에서 텍스트 청크에만 split_documents 적용
+        
         final_chunks = []
-
-        exchunk = ""
+        exchunk=""
         for chunk in preliminary_chunks:
-            # chunk.metadata.update({
-            #                 "source": file_path,
-            #                 "filename": os.path.basename(file_path),
-            #                 "category": file_type
-            #             })
+            # 표는 그대로 추가
             if chunk.page_content.strip().startswith('|'):
                 if exchunk != "":
-                    last_line = exchunk.page_content.strip().splitlines()[-1]
+                    last_line = last_n_lines(exchunk.page_content.strip(),5) 
                     chunk.page_content = last_line+'\n' + chunk.page_content
-                final_chunks.append(chunk) # 표는 그대로 추가
+                chunk.metadata["type"] = "table"
+                final_chunks.append(chunk)
+            # 텍스트는 text_splitter로 분할하여 추가
             else:
-                # 텍스트는 잘게 분할하여 추가
-                sub_chunks = text_splitter.create_documents([chunk.page_content], metadatas=[chunk.metadata])
+                chunk.metadata["type"] = "text"
+                sub_chunks = text_splitter.split_documents([chunk])
                 final_chunks.extend(sub_chunks)
             exchunk = chunk
-                
-        return final_chunks
+
+        KEYWORDS = ['우리', 'BC바로', 'SC제일', '하나', '농협', 'IBK', '국민', 'iM', 'BNK', '씨티', '신한', '수협']
+
+        def add_keyword_metadata(final_chunks: List[Document]) -> List[Document]:
+            # 정규식: 첫 번째 매칭 우선, 대소문자 구분 없음
+            pattern = re.compile("|".join(KEYWORDS))
+
+            for doc in final_chunks:
+                # 본문에서 키워드 탐색
+                match = pattern.search(doc.page_content)
+                if match:
+                    doc.metadata["keyword"] = match.group(0)  # 첫 번째 매칭값 저장
+                else:
+                    doc.metadata["keyword"] = ""  # 키워드 없으면 빈 문자열
+
+            return final_chunks
+
+        return add_keyword_metadata(final_chunks)
     
     @staticmethod
     def _index_files_by_type(files: List[str], file_type: str, embeddings, hybrid_tracker, 
@@ -431,16 +478,57 @@ class ElasticsearchIndexer:
             if not success:
                 raise Exception(f"Elasticsearch 연결 실패: {message}")
             
+            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+            DICT_DIR = os.path.join(BASE_DIR, "..", "..", "data", "dict")
+            DICT_DIR = os.path.normpath(DICT_DIR)  # 경로 정규화
+
+            # print(DICT_DIR)
+            # === 사용자 사전 로드 ===
+            with open(os.path.join(DICT_DIR, "userdict.txt"), encoding="utf-8") as f:
+                userdict_rules = [line.strip() for line in f if line.strip()]
+
+            # === 동의어 사전 로드 ===
+            with open(os.path.join(DICT_DIR, "synonyms.txt"), encoding="utf-8") as f:
+                synonyms_rules = [line.strip() for line in f if line.strip()]
+
             mapping = {
-                "mappings":{
-                    "properties":{
-                        "text":{
-                            "type":"text",
-                            "analyzer":"nori"
+                "settings": {
+                    "analysis": {
+                        "tokenizer": {
+                            "nori_user_dict": {
+                                "type": "nori_tokenizer",
+                                "decompound_mode": "mixed",
+                                "user_dictionary_rules": userdict_rules
+                            }
+                        },
+                        "analyzer": {
+                            "ko_search": {
+                                "type": "custom",
+                                "tokenizer": "nori_user_dict",
+                                "filter": ["lowercase", "ko_synonym"]
+                            }
+                        },
+                        "filter": {
+                            "ko_synonym": {
+                                "type": "synonym_graph",
+                                "expand": True,
+                                "lenient": True,
+                                "synonyms": synonyms_rules
+                            }
+                        }
+                    }
+                },
+                "mappings": {
+                    "properties": {
+                        "text": {
+                            "type": "text",
+                            "analyzer": "ko_search"
                         }
                     }
                 }
             }
+
 
             if es_client.indices.exists(index=INDEX_NAME):
                 es_client.indices.delete(index=INDEX_NAME)

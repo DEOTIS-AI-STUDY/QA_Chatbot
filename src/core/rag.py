@@ -426,6 +426,12 @@ prompt_for_refined_query = """
                         사용자 수정 지시: "아니 내 카드 말고"
                         재수정: "카드 결제일 알려줘" (일반적인 정보)
 
+4단계 (반드시 준수): 키워드 감지:
+- 사용자 질문에 ['우리','BC바로','SC제일','하나','농협','IBK','국민','iM','BNK','씨티','신한','수협'] 중 하나라도 포함되면,
+  "keyword"는 해당 단어 중 **등장 순서상 첫 번째**를 그대로 넣는다(대소문자/공백 보정 없이 원문 그대로).
+- 포함되지 않으면 "keyword": "" 로 넣는다.
+- reasoning에는 키워드 추출 언급을 1문장으로만 간단히 적는다.
+
 ### 출력 형식
 반드시 아래 JSON 형식에 맞춰서 결과를 반환해야 합니다:
 {{
@@ -433,7 +439,8 @@ prompt_for_refined_query = """
   "classification": "string", // 2단계 결과: GENERAL, HYBRID, USER_INFO_ONLY
   "action": "string", // 3단계 결과: SEARCH, DIRECT_ANSWER
   "refined_query": "string", // 3단계 결과: '즉답' 또는 '검색 최적화 질의'
-  "reasoning": "string" // 위 모든 결정에 대한 종합적인 이유
+  "reasoning": "string" // 위 모든 결정에 대한 종합적인 이유,
+  "keyword": "string" // 감지된 키워드 ['우리','BC바로','제일','하나','농협','IBK','국민','iM','BNK','씨티','신한','수협'] 중 하나, 없다면 빈 문자열 "".
 }}
 
 

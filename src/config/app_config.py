@@ -16,6 +16,69 @@ from core.chat_history import ChatHistoryManager
 from utils.elasticsearch import ElasticsearchManager
 
 
+def add_related_links(answer_text, question_text=""):
+    """
+    답변에 관련 링크를 자동으로 추가하는 함수
+    """
+    # 키워드-링크 매핑
+    keyword_links = {
+        '카드발급': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0792',
+        '이용한도': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1113',
+        '결제일': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0618',
+        '이용기간': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0623',
+        '리볼빙': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1187',
+        '교통카드': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0649',
+        '신용카드': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667',
+        '포인트': 'https://isson.bccard.com/3rd/openSigninFormPage.jsp?UURL=https%3A%2F%2Fisson.bccard.com%2Fnls3%2Ffcs&NONCE=tvaQoSYB9J90I5r1z%2Bu2gNqawETc7ThhYPlG%2Fz308%2FoRCuqBsL%2F6dQjzXnAfZ2CjYEisW42xcJTSYKyTiQfcwQ%3D%3D&FORM=777',
+        '혜택': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1200',
+        '대출': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667',
+        '할부': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667',
+        '연체': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0671',
+        '소득공제': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0670',
+        '해외': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0650',
+        '장애': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0791',
+        '분실': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0901',
+        '부가서비스': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1114',
+        '연체 절차': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1115'
+    }
+    
+    # 이미 링크가 있는지 확인
+    if '---' in answer_text and '자세한 사항을' in answer_text:
+        return answer_text
+    
+    # 답변과 질문에서 키워드 찾기
+    found_keywords = []
+    search_text = (answer_text + " " + question_text).lower()
+    
+    for keyword, link in keyword_links.items():
+        if keyword in search_text:
+            found_keywords.append((keyword, link))
+    
+    # 최대 3개까지만 선택 (질문 우선순위)
+    if found_keywords:
+        # 질문에 있는 키워드 우선
+        question_keywords = []
+        answer_keywords = []
+        
+        for keyword, link in found_keywords:
+            if keyword in question_text.lower():
+                question_keywords.append((keyword, link))
+            else:
+                answer_keywords.append((keyword, link))
+        
+        # 질문 키워드 + 답변 키워드 조합해서 최대 3개
+        selected_keywords = (question_keywords + answer_keywords)[:3]
+        
+        if selected_keywords:
+            link_section = "\n\n---\n자세한 사항을 알고 싶으시면 아래 링크를 참고하세요:\n"
+            for keyword, link in selected_keywords:
+                link_section += f"[{keyword}]({link})\n"
+            
+            return answer_text + link_section
+    
+    return answer_text
+
+
 def load_environment():
     """환경 변수 로드"""
     try:
@@ -103,6 +166,9 @@ class FastAPIRAGSystem:
         self.session_managers = {}
         self.is_initialized = False
         self.initialization_time = None
+
+        # 인덱스 관리
+        self.current_index_name = os.getenv("INDEX_NAME", "yang_deotis_rag")
     
     # =============================================================================
     # 세션 및 상태 관리 메서드
@@ -628,9 +694,12 @@ class FastAPIRAGSystem:
         
         print(f"🔍 직접 답변 모드 (프롬프트 생성): {direct_answer}")
         
+        # 🎯 관련 링크 자동 추가
+        enhanced_answer = add_related_links(direct_answer, query)
+    
         # 대화 기록에 질문과 답변 추가
         chat_manager = self.get_chat_manager(session_id)
-        chat_manager.add_chat(query, direct_answer)
+        chat_manager.add_chat(query, enhanced_answer)
         
         # Langfuse 로깅
         self._log_to_langfuse(trace, "direct_answer_generation", query, direct_answer, {
@@ -642,7 +711,7 @@ class FastAPIRAGSystem:
         
         return {
             "status": "success",
-            "answer": direct_answer,
+            "answer": enhanced_answer,
             "query": query,
             "refined_query": analysis_result["refined_query"],
             "classification": analysis_result["classification"],
@@ -682,15 +751,19 @@ class FastAPIRAGSystem:
 
         # 답변 추출
         if result and ('answer' in result or 'result' in result or 'text' in result):
-            answer = result.get('answer') or result.get('result') or result.get('text')
-            print(f"🔍 최종 답변: {answer}")
+            original_answer = result.get('answer') or result.get('result') or result.get('text')
+            print(f"🔍 원본 답변: {original_answer}")
+            
+            # 🎯 관련 링크 자동 추가
+            enhanced_answer = add_related_links(original_answer, query)
+            print(f"🔗 링크 추가된 최종 답변: {enhanced_answer}")
             
             # 대화 기록에 질문과 답변 추가
             chat_manager = self.get_chat_manager(session_id)
-            chat_manager.add_chat(query, answer)
+            chat_manager.add_chat(query, enhanced_answer)
 
             # Langfuse 로깅
-            self._log_to_langfuse(trace, "rag_generation", query, answer, {
+            self._log_to_langfuse(trace, "rag_generation", query, enhanced_answer, {
                 "processing_time": processing_time,
                 "retrieved_docs_count": len(merged_docs),
                 "model": self.model_choice
@@ -707,7 +780,7 @@ class FastAPIRAGSystem:
 
             return {
                 "status": "success",
-                "answer": answer,
+                "answer": enhanced_answer,
                 "query": query,
                 "refined_query": analysis_result["refined_query"],
                 "classification": analysis_result["classification"],
@@ -775,6 +848,115 @@ class FastAPIRAGSystem:
             "available_models": self.model_factory.get_available_models(),
             "langfuse_status": self.langfuse_manager.get_status() if self.langfuse_manager else {"available": False}
         }
+
+    # =============================================================================
+    # Elasticsearch 인덱스 관리 메서드들
+    # =============================================================================
+    
+    def change_elasticsearch_index(self, new_index_name: str) -> bool:
+        """Elasticsearch 인덱스를 동적으로 변경하는 메서드 (완전한 버전)"""
+        try:
+            # 새 인덱스 이름 유효성 검사
+            if not new_index_name or not isinstance(new_index_name, str):
+                raise ValueError("인덱스 이름이 유효하지 않습니다.")
+            
+            # 특수문자 검사 (Elasticsearch 인덱스 이름 규칙)
+            import re
+            if not re.match(r'^[a-z0-9_-]+$', new_index_name.lower()):
+                raise ValueError("인덱스 이름은 소문자, 숫자, '_', '-'만 사용할 수 있습니다.")
+            
+            old_index = self.current_index_name
+            print(f"🔄 인덱스 변경 시작: '{old_index}' → '{new_index_name}'")
+            
+            # 🎯 핵심: Retriever 완전 재생성
+            try:
+                # 기존 retriever 백업 (실패 시 복원용)
+                old_retriever = self.retriever if hasattr(self, 'retriever') else None
+                
+                # 시스템이 초기화되어 있는지 확인
+                if not self.is_initialized or not self.embedding_model:
+                    print("❌ 시스템이 초기화되지 않았습니다. 먼저 initialize를 수행하세요.")
+                    return False
+                
+                # 새 인덱스로 Enhanced Retriever 재생성
+                from core.rag import create_enhanced_retriever
+                
+                print(f"🔍 새 Retriever 생성 중... (인덱스: {new_index_name})")
+                
+                # index_name 파라미터를 명시적으로 전달
+                new_retriever = create_enhanced_retriever(
+                    embedding_model=self.embedding_model,
+                    top_k=self.top_k,
+                    index_name=new_index_name  # 🎯 새 인덱스 명시적 전달
+                )
+                
+                if new_retriever is None:
+                    raise Exception(f"인덱스 '{new_index_name}'로 Retriever 생성 실패")
+                
+                # 성공하면 교체
+                self.retriever = new_retriever
+                self.current_index_name = new_index_name
+                
+                print(f"✅ 인덱스 변경 완료: '{new_index_name}'")
+                print(f"✅ Retriever 재생성 완료")
+                
+                return True
+                
+            except Exception as retriever_error:
+                # 실패 시 기존 retriever 복원
+                print(f"❌ Retriever 재생성 실패: {str(retriever_error)}")
+                print(f"🔄 기존 인덱스 '{old_index}'로 복원")
+                
+                if old_retriever is not None:
+                    self.retriever = old_retriever
+                
+                return False
+            
+        except Exception as e:
+            print(f"❌ 인덱스 변경 중 오류 발생: {str(e)}")
+            return False
+    
+    def get_current_index(self) -> str:
+        """현재 사용 중인 Elasticsearch 인덱스 이름을 반환"""
+        return self.current_index_name
+    
+    def list_available_indices(self) -> list:
+        """사용 가능한 Elasticsearch 인덱스 목록을 반환"""
+        try:
+            from utils.elasticsearch import ElasticsearchManager
+            
+            # 실제 Elasticsearch에서 인덱스 목록 조회
+            indices = ElasticsearchManager.get_index_names()
+            
+            if not indices:
+                print("⚠️ Elasticsearch에서 인덱스를 찾을 수 없습니다.")
+                return ["yang_deotis_rag", "test2_rag"]  # 기본값
+            
+            print(f"📊 Elasticsearch에서 {len(indices)}개 인덱스 발견: {indices}")
+            return indices
+            
+        except Exception as e:
+            print(f"❌ 인덱스 목록 조회 중 오류: {str(e)}")
+            return ["yang_deotis_rag", "test2_rag"]  # 기본값
+    
+    def get_indices_detailed_info(self) -> list:
+        """Elasticsearch 인덱스 상세 정보 조회 (curl -s http://localhost:9200/_cat/indices?v 와 유사)"""
+        try:
+            from utils.elasticsearch import ElasticsearchManager
+            
+            # 상세 인덱스 정보 조회
+            indices_info = ElasticsearchManager.get_all_indices()
+            
+            if not indices_info:
+                print("⚠️ Elasticsearch에서 인덱스 정보를 찾을 수 없습니다.")
+                return []
+            
+            print(f"📊 Elasticsearch 인덱스 상세 정보 조회 완료: {len(indices_info)}개")
+            return indices_info
+            
+        except Exception as e:
+            print(f"❌ 인덱스 상세 정보 조회 중 오류: {str(e)}")
+            return []
 
 
 @asynccontextmanager

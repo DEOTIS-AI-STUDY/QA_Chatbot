@@ -40,11 +40,14 @@ class ElasticsearchManager:
     """Elasticsearch 검색 및 연결 관리 클래스"""
     
     @staticmethod
-    def keyword_search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def keyword_search(query: str, top_k: int = 5, index_name: str = None) -> List[Dict[str, Any]]:
         """키워드(단순 텍스트) 기반 검색"""
+        # 인덱스 이름 결정 (파라미터 > 환경변수 > 기본값)
+        target_index = index_name or os.getenv("INDEX_NAME") or INDEX_NAME
+        
         config = ElasticsearchManager.get_connection_config()
         es = Elasticsearch(**config)
-        if not es.indices.exists(index=INDEX_NAME):
+        if not es.indices.exists(index=target_index):
             return []
         body = {
             "query": {
@@ -57,7 +60,7 @@ class ElasticsearchManager:
             "size": top_k
         }
         try:
-            res = es.search(index=INDEX_NAME, body=body)
+            res = es.search(index=target_index, body=body)
             hits = res.get("hits", {}).get("hits", [])
             results = []
             for hit in hits:
@@ -70,6 +73,54 @@ class ElasticsearchManager:
             return results
         except Exception as e:
             print(f"[ElasticsearchManager] 키워드 검색 오류: {e}")
+            return []
+    
+    @staticmethod
+    def get_all_indices() -> List[Dict[str, Any]]:
+        """모든 Elasticsearch 인덱스 목록 조회 (상세 정보 포함)"""
+        try:
+            config = ElasticsearchManager.get_connection_config()
+            es = Elasticsearch(**config)
+            
+            # 인덱스 목록과 상세 정보 조회
+            indices_info = es.cat.indices(format="json", v=True)
+            
+            # 필요한 정보만 추출하여 정렬
+            result = []
+            for index_info in indices_info:
+                result.append({
+                    "index": index_info.get("index", ""),
+                    "health": index_info.get("health", ""),
+                    "status": index_info.get("status", ""),
+                    "docs_count": index_info.get("docs.count", "0"),
+                    "docs_deleted": index_info.get("docs.deleted", "0"),
+                    "store_size": index_info.get("store.size", "0b"),
+                    "pri_store_size": index_info.get("pri.store.size", "0b")
+                })
+            
+            # 인덱스 이름으로 정렬
+            result.sort(key=lambda x: x["index"])
+            return result
+            
+        except Exception as e:
+            print(f"[ElasticsearchManager] 인덱스 목록 조회 오류: {e}")
+            return []
+    
+    @staticmethod 
+    def get_index_names() -> List[str]:
+        """인덱스 이름 목록만 간단하게 조회"""
+        try:
+            config = ElasticsearchManager.get_connection_config()
+            es = Elasticsearch(**config)
+            
+            # 인덱스 이름만 조회
+            indices = es.cat.indices(format="json", h="index")
+            index_names = [idx["index"] for idx in indices]
+            index_names.sort()
+            return index_names
+            
+        except Exception as e:
+            print(f"[ElasticsearchManager] 인덱스 이름 목록 조회 오류: {e}")
             return []
     
     @staticmethod

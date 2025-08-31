@@ -2,7 +2,7 @@
 임베딩 및 LLM 모델 팩토리
 """
 import os
-from typing import Optional
+from typing import Optional, List, Dict, Any, Tuple
 from core.config import (
     BGE_MODEL_NAME, LLM_MODELS,
     HUGGINGFACE_EMBEDDINGS_AVAILABLE, OLLAMA_AVAILABLE, TRANSFORMERS_AVAILABLE,
@@ -229,3 +229,142 @@ class ModelFactory:
         if TRANSFORMERS_AVAILABLE:
             available_models["solar_pro_preview"] = LLM_MODELS["solar_pro_preview"]
         return available_models
+
+    # =============================================================================
+    # Ollama 모델 관리 메서드들
+    # =============================================================================
+    
+    @staticmethod
+    def get_ollama_manager():
+        """OllamaManager 인스턴스 반환"""
+        try:
+            from utils.ollama_manager import OllamaManager
+            return OllamaManager()
+        except ImportError as e:
+            print(f"OllamaManager import 실패: {e}")
+            return None
+    
+    @staticmethod
+    def list_ollama_models() -> Tuple[List[Dict[str, Any]], str]:
+        """설치된 Ollama 모델 목록 조회"""
+        if not OLLAMA_AVAILABLE:
+            return [], "Ollama가 사용 불가능합니다"
+        
+        ollama_manager = ModelFactory.get_ollama_manager()
+        if not ollama_manager:
+            return [], "OllamaManager를 초기화할 수 없습니다"
+        
+        # Ollama 연결 확인
+        connected, message = ollama_manager.check_ollama_connection()
+        if not connected:
+            return [], f"Ollama 연결 실패: {message}"
+        
+        return ollama_manager.list_models()
+    
+    @staticmethod
+    def add_ollama_model(model_name: str) -> Tuple[bool, str]:
+        """Ollama 모델 추가 (다운로드)"""
+        if not OLLAMA_AVAILABLE:
+            return False, "Ollama가 사용 불가능합니다"
+        
+        ollama_manager = ModelFactory.get_ollama_manager()
+        if not ollama_manager:
+            return False, "OllamaManager를 초기화할 수 없습니다"
+        
+        # Ollama 연결 확인
+        connected, message = ollama_manager.check_ollama_connection()
+        if not connected:
+            return False, f"Ollama 연결 실패: {message}"
+        
+        # 모델 다운로드
+        success, result_message = ollama_manager.pull_model(model_name)
+        
+        if success:
+            # LLM_MODELS에 자동으로 추가
+            ModelFactory.register_ollama_model_to_config(model_name)
+        
+        return success, result_message
+    
+    @staticmethod 
+    def remove_ollama_model(model_name: str) -> Tuple[bool, str]:
+        """Ollama 모델 삭제"""
+        if not OLLAMA_AVAILABLE:
+            return False, "Ollama가 사용 불가능합니다"
+        
+        ollama_manager = ModelFactory.get_ollama_manager()
+        if not ollama_manager:
+            return False, "OllamaManager를 초기화할 수 없습니다"
+        
+        # Ollama 연결 확인
+        connected, message = ollama_manager.check_ollama_connection()
+        if not connected:
+            return False, f"Ollama 연결 실패: {message}"
+        
+        # 모델 삭제
+        success, result_message = ollama_manager.delete_model(model_name)
+        
+        if success:
+            # LLM_MODELS에서도 제거
+            ModelFactory.unregister_ollama_model_from_config(model_name)
+        
+        return success, result_message
+    
+    @staticmethod
+    def register_ollama_model_to_config(model_name: str):
+        """LLM_MODELS 설정에 Ollama 모델 등록"""
+        # 안전한 키 생성 (특수문자 제거)
+        safe_key = model_name.replace(":", "_").replace("-", "_").replace(".", "_")
+        
+        if safe_key not in LLM_MODELS:
+            LLM_MODELS[safe_key] = {
+                "name": f"{model_name} (Ollama)",
+                "model_id": model_name,
+                "api_key_env": None
+            }
+            print(f"✅ 모델 '{model_name}' 을 설정에 등록했습니다 (키: {safe_key})")
+    
+    @staticmethod
+    def unregister_ollama_model_from_config(model_name: str):
+        """LLM_MODELS 설정에서 Ollama 모델 제거"""
+        # 안전한 키 생성
+        safe_key = model_name.replace(":", "_").replace("-", "_").replace(".", "_")
+        
+        if safe_key in LLM_MODELS:
+            del LLM_MODELS[safe_key]
+            print(f"✅ 모델 '{model_name}' 을 설정에서 제거했습니다 (키: {safe_key})")
+    
+    @staticmethod
+    def get_available_ollama_models_from_library() -> List[str]:
+        """Ollama 라이브러리에서 다운로드 가능한 모델 목록"""
+        ollama_manager = ModelFactory.get_ollama_manager()
+        if not ollama_manager:
+            return []
+        
+        return ollama_manager.get_available_models_from_library()
+    
+    @staticmethod
+    def check_ollama_status() -> Tuple[bool, str, Dict[str, Any]]:
+        """Ollama 서버 상태 및 설치된 모델 정보 확인"""
+        if not OLLAMA_AVAILABLE:
+            return False, "Ollama가 사용 불가능합니다", {}
+        
+        ollama_manager = ModelFactory.get_ollama_manager()
+        if not ollama_manager:
+            return False, "OllamaManager를 초기화할 수 없습니다", {}
+        
+        # 연결 확인
+        connected, message = ollama_manager.check_ollama_connection()
+        if not connected:
+            return False, message, {}
+        
+        # 모델 목록 조회
+        models, list_message = ollama_manager.list_models()
+        
+        status_info = {
+            "server_url": ollama_manager.base_url,
+            "models_count": len(models),
+            "models": models,
+            "list_message": list_message
+        }
+        
+        return True, "Ollama 서버 정상 작동", status_info

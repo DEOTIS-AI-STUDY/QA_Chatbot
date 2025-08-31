@@ -83,3 +83,44 @@ class IndexDetailedResponse(BaseModel):
     current_index: str
     count: int
     status: str
+
+
+# Ollama 모델 관리 관련 모델들
+class OllamaModelInfo(BaseModel):
+    name: str
+    size: int
+    digest: str
+    modified_at: str
+    details: Dict[str, Any]
+
+
+class OllamaModelsResponse(BaseModel):
+    models: List[OllamaModelInfo]
+    count: int
+    status: str
+    message: str
+
+
+class OllamaModelActionRequest(BaseModel):
+    model_name: str = Field(..., description="Ollama 모델 이름 (예: llama3.1:8b)", min_length=1)
+
+
+class OllamaModelActionResponse(BaseModel):
+    success: bool
+    message: str
+    model_name: str
+
+
+class OllamaStatusResponse(BaseModel):
+    available: bool
+    server_url: str
+    message: str
+    models_count: int
+    models: List[OllamaModelInfo]
+    status: str
+
+
+class AvailableOllamaModelsResponse(BaseModel):
+    available_models: List[str]
+    count: int
+    status: str

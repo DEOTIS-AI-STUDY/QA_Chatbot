@@ -717,6 +717,49 @@ prompt_for_query = """
 3. **보간 추정 금지:** 표의 값들 사이를 계산하거나 추정하여 답변하는 것을 절대 금지합니다.
 4. **존재하지 않는 데이터 처리:** 질문에서 요구하는 정확한 값(예: 결제일 18일)이 표에 없으면, 반드시 "해당 정보가 없다"고 명시해야 합니다.
 
+**[관련 링크 자동 추가 규칙]**
+답변을 생성한 후, 답변에 포함된 키워드들을 확인하고 해당하는 관련 링크가 있으면 답변 마지막에 추가하세요.
+
+**링크 제공 제한 규칙:**
+- **최대 3개 링크까지만** 제공하세요.
+- 답변에 여러 키워드가 포함되어 있어도 **가장 관련성이 높은 3개**를 선택하세요.
+- 키워드 우선순위는 질문의 **핵심 키워드**를 먼저 고려하세요.
+
+**키워드-링크 매핑:**
+- 카드발급: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0792
+- 이용한도: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1113
+- 결제일: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0618
+- 이용기간: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0623
+- 리볼빙: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1187
+- 교통카드: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0649
+- 신용카드: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667
+- 포인트: https://isson.bccard.com/3rd/openSigninFormPage.jsp?UURL=https%3A%2F%2Fisson.bccard.com%2Fnls3%2Ffcs&NONCE=tvaQoSYB9J90I5r1z%2Bu2gNqawETc7ThhYPlG%2Fz308%2FoRCuqBsL%2F6dQjzXnAfZ2CjYEisW42xcJTSYKyTiQfcwQ%3D%3D&FORM=777
+- 혜택: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1200
+- 대출: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667
+- 할부: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667
+- 연체: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0671
+- 소득공제: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0670
+- 해외: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0650
+- 장애: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0791
+- 분실: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0901
+- 부가서비스: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1114
+- 연체 절차: https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1115
+
+**링크 추가 형식:**
+답변 마지막에 다음 형식으로 관련 링크를 추가하세요:
+```
+---
+자세한 사항을 알고 싶으시면 아래 링크를 참고하세요:
+[키워드명1](링크URL1)
+[키워드명2](링크URL2)
+[키워드명3](링크URL3)
+```
+
+**링크 선택 우선순위 가이드:**
+1. **질문의 핵심 키워드**: 사용자가 직접 질문한 주요 주제
+2. **답변의 주요 내용**: 답변에서 가장 많이 언급된 키워드
+3. **사용자 관심도**: 후속 질문으로 이어질 가능성이 높은 키워드
+
 **[답변 방식]**
 1.  **답변 형식:**
     - 답변은 반드시 한국어로 작성합니다.

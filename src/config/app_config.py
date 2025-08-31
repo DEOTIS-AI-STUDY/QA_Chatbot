@@ -29,6 +29,7 @@ def add_related_links(answer_text, question_text=""):
         '리볼빙': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1187',
         '교통카드': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0649',
         '신용카드': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667',
+        '포인트': 'https://isson.bccard.com/3rd/openSigninFormPage.jsp?UURL=https%3A%2F%2Fisson.bccard.com%2Fnls3%2Ffcs&NONCE=tvaQoSYB9J90I5r1z%2Bu2gNqawETc7ThhYPlG%2Fz308%2FoRCuqBsL%2F6dQjzXnAfZ2CjYEisW42xcJTSYKyTiQfcwQ%3D%3D&FORM=777',
         '혜택': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1200',
         '대출': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667',
         '할부': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667',
@@ -38,10 +39,7 @@ def add_related_links(answer_text, question_text=""):
         '장애': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0791',
         '분실': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0901',
         '부가서비스': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1114',
-        '포인트': 'https://isson.bccard.com/3rd/openSigninFormPage.jsp',
-        '현금서비스': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667',
-        '가족카드': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0792',
-        '연회비': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind0667'
+        '연체 절차': 'https://www.bccard.com/app/card/ContentsLinkActn.do?pgm_id=ind1115'
     }
     
     # 이미 링크가 있는지 확인

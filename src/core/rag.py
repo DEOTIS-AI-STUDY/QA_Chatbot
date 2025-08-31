@@ -796,7 +796,7 @@ def create_enhanced_retriever(embedding_model, top_k=3):
                     keyword_score = sum(1 for keyword in query_keywords if keyword in content)
                     
                     # 관련성 임계값 설정 (환각 방지)
-                    min_relevance_score = 0.1
+                    min_relevance_score = 0.75
                     if keyword_score == 0 and len(doc.page_content) < 50:
                         # 키워드 매칭이 전혀 없고 내용이 너무 짧으면 제외
                         continue
@@ -805,33 +805,25 @@ def create_enhanced_retriever(embedding_model, top_k=3):
                     
                     # 메타데이터 기반 스코어링
                     if hasattr(doc, 'metadata') and doc.metadata:
-                        # 구조 타입 기반 가중치
-                        if doc.metadata.get('structure_type') == '업무안내서' and '업무' in query:
-                            metadata_score += 2
-                        if doc.metadata.get('content_type') == '절차안내' and ('절차' in query or '방법' in query):
-                            metadata_score += 1.5
-                        
+
                         # 표 포함 문서 가중치
-                        if doc.metadata.get('has_tables') and ('표' in query or '목록' in query or '기준' in query):
-                            metadata_score += 1
-                        if doc.metadata.get('has_table') and ('표' in query or '목록' in query):
-                            metadata_score += 1
+                        if doc.metadata.get('type') and ('표' in query or '목록' in query or '기준' in query):
+                            metadata_score += 0.5
                             
                         # 카테고리 기반 가중치
                         if doc.metadata.get('category') == 'DOCX' and ('안내' in query or '절차' in query):
-                            metadata_score += 1.5
+                            metadata_score += 0.5
                         if doc.metadata.get('category') == 'PDF' and ('규정' in query or '정책' in query):
-                            metadata_score += 1.2
-                            
-                        # 제목/헤딩 매칭 가중치
-                        title = doc.metadata.get('title', '').lower()
-                        heading = doc.metadata.get('heading', '').lower()
-                        for keyword in query_keywords:
-                            if keyword in title:
-                                metadata_score += 2
-                            if keyword in heading:
-                                metadata_score += 1.5
-                                
+                            metadata_score += 0.5
+                        
+                        # 새로 추가: 파일명 기반 가중치 (키워드 매칭)
+                        filename = doc.metadata.get('filename', '').lower()
+                        
+                        # 신용카드 관련 파일명 가중치
+                        if '신용카드' in query.lower() and '신용카드' in filename:
+                            metadata_score += 1
+                            print(f"  ✅ 신용카드 파일명 매칭 보너스: {filename}")
+
                         # 키워드 필드 매칭 가중치
                         keywords_field = doc.metadata.get('keywords', '').lower()
                         for keyword in query_keywords:
@@ -859,6 +851,16 @@ def create_enhanced_retriever(embedding_model, top_k=3):
                 # 스코어 기반 정렬 후 상위 k개 반환
                 scored_docs.sort(key=lambda x: x[1], reverse=True)
                 final_docs = [doc for doc, _ in scored_docs[:top_k]]
+
+                print(f"\n🏆 최종 선택된 문서들:")
+                for i, (doc, score) in enumerate(scored_docs[:top_k], 1):
+                    # 🎯 content의 앞 30자만 추출
+                    if hasattr(doc, 'page_content'):
+                        content_preview = doc.page_content[:30] + "..." if len(doc.page_content) > 30 else doc.page_content
+                    else:
+                        content_preview = 'Unknown'
+                    
+                    print(f"   {i}. {content_preview} (점수: {score})")
                 
                 # 빈 결과 처리
                 if not final_docs:

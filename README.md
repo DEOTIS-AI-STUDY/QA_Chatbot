@@ -58,5 +58,16 @@ docker-compose down && docker-compose up -d
 docker compose stop elasticsearch
 
 ```
+# 프로젝트 흐름도
 
 <br/>
+
+<img width="5688" height="1406" alt="이미지추출용 excalidraw" src="https://github.com/user-attachments/assets/25116f7c-f964-487f-b742-167091173035" />
+
+<img width="11683" height="1585" alt="이미지추출용 excalidraw" src="https://github.com/user-attachments/assets/b1995084-7d34-4487-9c0b-32cf22d7c8e8" />
+
+<img width="7947" height="2388" alt="이미지추출용 excalidraw" src="https://github.com/user-attachments/assets/012cb1e5-c4f1-4eb2-9d6c-74a7eb8f6bb3" />
+
+
+
+

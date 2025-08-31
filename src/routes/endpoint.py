@@ -25,7 +25,8 @@ from models.api_models import (
     IndexChangeRequest,
     IndexChangeResponse,
     CurrentIndexResponse,
-    IndexListResponse
+    IndexListResponse,
+    IndexDetailedResponse
 )
 
 # 핵심 기능 모듈들
@@ -207,6 +208,23 @@ def create_endpoints(app, current_api_dir: str):
             raise HTTPException(
                 status_code=500,
                 detail=f"인덱스 목록 조회 중 오류 발생: {str(e)}"
+            )
+
+    @app.get("/admin/indices-detailed", response_model=IndexDetailedResponse)
+    async def get_indices_detailed_info(rag_system: FastAPIRAGSystem = Depends(get_rag_system)):
+        """Elasticsearch 인덱스 상세 정보 조회 (curl -s http://localhost:9200/_cat/indices?v 와 유사)"""
+        try:
+            indices_info = rag_system.get_indices_detailed_info()
+            return IndexDetailedResponse(
+                indices=indices_info,
+                current_index=rag_system.get_current_index(),
+                count=len(indices_info),
+                status="success"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"인덱스 상세 정보 조회 중 오류 발생: {str(e)}"
             )
 
     # 파일 변환 관련 엔드포인트들

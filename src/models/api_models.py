@@ -76,3 +76,10 @@ class IndexListResponse(BaseModel):
     current_index: str
     count: int
     status: str
+
+
+class IndexDetailedResponse(BaseModel):
+    indices: List[Dict[str, Any]]
+    current_index: str
+    count: int
+    status: str

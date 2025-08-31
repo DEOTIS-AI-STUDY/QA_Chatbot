@@ -923,16 +923,40 @@ class FastAPIRAGSystem:
     def list_available_indices(self) -> list:
         """사용 가능한 Elasticsearch 인덱스 목록을 반환"""
         try:
-            if hasattr(self, 'retriever') and self.retriever and hasattr(self.retriever, 'client'):
-                es_client = self.retriever.client
-                if es_client and hasattr(es_client, 'indices'):
-                    # 모든 인덱스 조회
-                    indices = es_client.indices.get_alias(index="*")
-                    return list(indices.keys())
-            return ["test2_rag", "yang_deotis_rag"]  # 기본값
+            from utils.elasticsearch import ElasticsearchManager
+            
+            # 실제 Elasticsearch에서 인덱스 목록 조회
+            indices = ElasticsearchManager.get_index_names()
+            
+            if not indices:
+                print("⚠️ Elasticsearch에서 인덱스를 찾을 수 없습니다.")
+                return ["yang_deotis_rag", "test2_rag"]  # 기본값
+            
+            print(f"📊 Elasticsearch에서 {len(indices)}개 인덱스 발견: {indices}")
+            return indices
+            
         except Exception as e:
-            print(f"인덱스 목록 조회 중 오류: {str(e)}")
-            return ["test2_rag", "yang_deotis_rag"]  # 기본값
+            print(f"❌ 인덱스 목록 조회 중 오류: {str(e)}")
+            return ["yang_deotis_rag", "test2_rag"]  # 기본값
+    
+    def get_indices_detailed_info(self) -> list:
+        """Elasticsearch 인덱스 상세 정보 조회 (curl -s http://localhost:9200/_cat/indices?v 와 유사)"""
+        try:
+            from utils.elasticsearch import ElasticsearchManager
+            
+            # 상세 인덱스 정보 조회
+            indices_info = ElasticsearchManager.get_all_indices()
+            
+            if not indices_info:
+                print("⚠️ Elasticsearch에서 인덱스 정보를 찾을 수 없습니다.")
+                return []
+            
+            print(f"📊 Elasticsearch 인덱스 상세 정보 조회 완료: {len(indices_info)}개")
+            return indices_info
+            
+        except Exception as e:
+            print(f"❌ 인덱스 상세 정보 조회 중 오류: {str(e)}")
+            return []
 
 
 @asynccontextmanager

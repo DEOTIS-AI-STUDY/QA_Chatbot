@@ -76,6 +76,54 @@ class ElasticsearchManager:
             return []
     
     @staticmethod
+    def get_all_indices() -> List[Dict[str, Any]]:
+        """모든 Elasticsearch 인덱스 목록 조회 (상세 정보 포함)"""
+        try:
+            config = ElasticsearchManager.get_connection_config()
+            es = Elasticsearch(**config)
+            
+            # 인덱스 목록과 상세 정보 조회
+            indices_info = es.cat.indices(format="json", v=True)
+            
+            # 필요한 정보만 추출하여 정렬
+            result = []
+            for index_info in indices_info:
+                result.append({
+                    "index": index_info.get("index", ""),
+                    "health": index_info.get("health", ""),
+                    "status": index_info.get("status", ""),
+                    "docs_count": index_info.get("docs.count", "0"),
+                    "docs_deleted": index_info.get("docs.deleted", "0"),
+                    "store_size": index_info.get("store.size", "0b"),
+                    "pri_store_size": index_info.get("pri.store.size", "0b")
+                })
+            
+            # 인덱스 이름으로 정렬
+            result.sort(key=lambda x: x["index"])
+            return result
+            
+        except Exception as e:
+            print(f"[ElasticsearchManager] 인덱스 목록 조회 오류: {e}")
+            return []
+    
+    @staticmethod 
+    def get_index_names() -> List[str]:
+        """인덱스 이름 목록만 간단하게 조회"""
+        try:
+            config = ElasticsearchManager.get_connection_config()
+            es = Elasticsearch(**config)
+            
+            # 인덱스 이름만 조회
+            indices = es.cat.indices(format="json", h="index")
+            index_names = [idx["index"] for idx in indices]
+            index_names.sort()
+            return index_names
+            
+        except Exception as e:
+            print(f"[ElasticsearchManager] 인덱스 이름 목록 조회 오류: {e}")
+            return []
+    
+    @staticmethod
     def get_connection_config() -> Dict[str, Any]:
         """Elasticsearch 연결 설정 생성"""
         config = {

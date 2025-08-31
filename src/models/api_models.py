@@ -53,3 +53,26 @@ class ConversionResponse(BaseModel):
 class SupportedFormatsResponse(BaseModel):
     supported_formats: List[str]
     conversion_types: Dict[str, List[str]]
+
+
+# Admin 관련 모델들
+class IndexChangeRequest(BaseModel):
+    index_name: str = Field(..., description="변경할 인덱스 이름", min_length=1)
+
+
+class IndexChangeResponse(BaseModel):
+    status: str
+    message: str
+    current_index: str
+
+
+class CurrentIndexResponse(BaseModel):
+    current_index: str
+    status: str
+
+
+class IndexListResponse(BaseModel):
+    indices: List[str]
+    current_index: str
+    count: int
+    status: str

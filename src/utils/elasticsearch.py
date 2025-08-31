@@ -40,11 +40,14 @@ class ElasticsearchManager:
     """Elasticsearch 검색 및 연결 관리 클래스"""
     
     @staticmethod
-    def keyword_search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def keyword_search(query: str, top_k: int = 5, index_name: str = None) -> List[Dict[str, Any]]:
         """키워드(단순 텍스트) 기반 검색"""
+        # 인덱스 이름 결정 (파라미터 > 환경변수 > 기본값)
+        target_index = index_name or os.getenv("INDEX_NAME") or INDEX_NAME
+        
         config = ElasticsearchManager.get_connection_config()
         es = Elasticsearch(**config)
-        if not es.indices.exists(index=INDEX_NAME):
+        if not es.indices.exists(index=target_index):
             return []
         body = {
             "query": {
@@ -57,7 +60,7 @@ class ElasticsearchManager:
             "size": top_k
         }
         try:
-            res = es.search(index=INDEX_NAME, body=body)
+            res = es.search(index=target_index, body=body)
             hits = res.get("hits", {}).get("hits", [])
             results = []
             for hit in hits:

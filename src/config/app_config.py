@@ -166,6 +166,9 @@ class FastAPIRAGSystem:
         self.session_managers = {}
         self.is_initialized = False
         self.initialization_time = None
+
+        # 인덱스 관리
+        self.current_index_name = os.getenv("INDEX_NAME", "yang_deotis_rag")
     
     # =============================================================================
     # 세션 및 상태 관리 메서드
@@ -845,6 +848,91 @@ class FastAPIRAGSystem:
             "available_models": self.model_factory.get_available_models(),
             "langfuse_status": self.langfuse_manager.get_status() if self.langfuse_manager else {"available": False}
         }
+
+    # =============================================================================
+    # Elasticsearch 인덱스 관리 메서드들
+    # =============================================================================
+    
+    def change_elasticsearch_index(self, new_index_name: str) -> bool:
+        """Elasticsearch 인덱스를 동적으로 변경하는 메서드 (완전한 버전)"""
+        try:
+            # 새 인덱스 이름 유효성 검사
+            if not new_index_name or not isinstance(new_index_name, str):
+                raise ValueError("인덱스 이름이 유효하지 않습니다.")
+            
+            # 특수문자 검사 (Elasticsearch 인덱스 이름 규칙)
+            import re
+            if not re.match(r'^[a-z0-9_-]+$', new_index_name.lower()):
+                raise ValueError("인덱스 이름은 소문자, 숫자, '_', '-'만 사용할 수 있습니다.")
+            
+            old_index = self.current_index_name
+            print(f"🔄 인덱스 변경 시작: '{old_index}' → '{new_index_name}'")
+            
+            # 🎯 핵심: Retriever 완전 재생성
+            try:
+                # 기존 retriever 백업 (실패 시 복원용)
+                old_retriever = self.retriever if hasattr(self, 'retriever') else None
+                
+                # 시스템이 초기화되어 있는지 확인
+                if not self.is_initialized or not self.embedding_model:
+                    print("❌ 시스템이 초기화되지 않았습니다. 먼저 initialize를 수행하세요.")
+                    return False
+                
+                # 새 인덱스로 Enhanced Retriever 재생성
+                from core.rag import create_enhanced_retriever
+                
+                print(f"🔍 새 Retriever 생성 중... (인덱스: {new_index_name})")
+                
+                # index_name 파라미터를 명시적으로 전달
+                new_retriever = create_enhanced_retriever(
+                    embedding_model=self.embedding_model,
+                    top_k=self.top_k,
+                    index_name=new_index_name  # 🎯 새 인덱스 명시적 전달
+                )
+                
+                if new_retriever is None:
+                    raise Exception(f"인덱스 '{new_index_name}'로 Retriever 생성 실패")
+                
+                # 성공하면 교체
+                self.retriever = new_retriever
+                self.current_index_name = new_index_name
+                
+                print(f"✅ 인덱스 변경 완료: '{new_index_name}'")
+                print(f"✅ Retriever 재생성 완료")
+                
+                return True
+                
+            except Exception as retriever_error:
+                # 실패 시 기존 retriever 복원
+                print(f"❌ Retriever 재생성 실패: {str(retriever_error)}")
+                print(f"🔄 기존 인덱스 '{old_index}'로 복원")
+                
+                if old_retriever is not None:
+                    self.retriever = old_retriever
+                
+                return False
+            
+        except Exception as e:
+            print(f"❌ 인덱스 변경 중 오류 발생: {str(e)}")
+            return False
+    
+    def get_current_index(self) -> str:
+        """현재 사용 중인 Elasticsearch 인덱스 이름을 반환"""
+        return self.current_index_name
+    
+    def list_available_indices(self) -> list:
+        """사용 가능한 Elasticsearch 인덱스 목록을 반환"""
+        try:
+            if hasattr(self, 'retriever') and self.retriever and hasattr(self.retriever, 'client'):
+                es_client = self.retriever.client
+                if es_client and hasattr(es_client, 'indices'):
+                    # 모든 인덱스 조회
+                    indices = es_client.indices.get_alias(index="*")
+                    return list(indices.keys())
+            return ["test2_rag", "yang_deotis_rag"]  # 기본값
+        except Exception as e:
+            print(f"인덱스 목록 조회 중 오류: {str(e)}")
+            return ["test2_rag", "yang_deotis_rag"]  # 기본값
 
 
 @asynccontextmanager

@@ -898,7 +898,7 @@ def create_retriever(embedding_model, top_k=3):
         print(f"❌ Retriever 생성 오류: {str(e)}")
         return None
 
-def create_enhanced_retriever(embedding_model, top_k=3):
+def create_enhanced_retriever(embedding_model, top_k=3, index_name=None):
     """
     고도화된 하이브리드 검색 Retriever 생성 함수
     - 시맨틱 + 키워드 검색 조합
@@ -908,11 +908,17 @@ def create_enhanced_retriever(embedding_model, top_k=3):
     
     :param embedding_model: 임베딩 모델 객체
     :param top_k: 검색할 문서 개수
+    :param index_name: 사용할 Elasticsearch 인덱스 이름 (None이면 환경변수 사용)
     :return: Enhanced Retriever 객체 또는 None
     """
     try:
-        from core.config import ELASTICSEARCH_URL, INDEX_NAME
+        from core.config import ELASTICSEARCH_URL, INDEX_NAME as DEFAULT_INDEX_NAME
         from langchain_community.vectorstores import ElasticsearchStore
+        
+        # 인덱스 이름 결정 (파라미터 > 환경변수 > 기본값)
+        target_index = index_name or os.getenv("INDEX_NAME") or DEFAULT_INDEX_NAME
+        
+        print(f"🔍 Enhanced Retriever 생성 - 인덱스: {target_index}")
         
         # Elasticsearch 연결 확인
         es_client, success, message = ElasticsearchManager.get_safe_elasticsearch_client()
@@ -920,19 +926,21 @@ def create_enhanced_retriever(embedding_model, top_k=3):
             print(f"❌ Elasticsearch 연결 실패: {message}")
             return None
             
-        if not es_client.indices.exists(index=INDEX_NAME):
-            print(f"❌ 인덱스 '{INDEX_NAME}'가 존재하지 않습니다.")
+        if not es_client.indices.exists(index=target_index):
+            print(f"❌ 인덱스 '{target_index}'가 존재하지 않습니다.")
             return None
             
-        doc_count = es_client.count(index=INDEX_NAME).get("count", 0)
+        doc_count = es_client.count(index=target_index).get("count", 0)
         if doc_count == 0:
-            print(f"❌ 인덱스 '{INDEX_NAME}'에 문서가 없습니다.")
+            print(f"❌ 인덱스 '{target_index}'에 문서가 없습니다.")
             return None
+        
+        print(f"📊 인덱스 '{target_index}' - 문서 개수: {doc_count}")
         
         # 벡터스토어 생성
         vectorstore = ElasticsearchStore(
             embedding=embedding_model,
-            index_name=INDEX_NAME,
+            index_name=target_index,  # 동적 인덱스 이름 사용
             es_url=ELASTICSEARCH_URL,
         )
         
@@ -950,8 +958,8 @@ def create_enhanced_retriever(embedding_model, top_k=3):
                 # 1차: 시맨틱 검색
                 semantic_docs = base_retriever.get_relevant_documents(query)
                 
-                # 2차: 키워드 검색으로 보완
-                keyword_results = ElasticsearchManager.keyword_search(query, top_k * 2)
+                # 2차: 키워드 검색으로 보완 (동적 인덱스 사용)
+                keyword_results = ElasticsearchManager.keyword_search(query, top_k * 2, index_name=target_index)
                 
                 # 3차: 정교한 스코어링 시스템
                 query_keywords = query.lower().split()

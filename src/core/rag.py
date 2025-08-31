@@ -861,7 +861,52 @@ def create_enhanced_retriever(embedding_model, top_k=3):
                         content_preview = 'Unknown'
                     
                     print(f"   {i}. {content_preview} (점수: {score})")
+                # 🎯 결제일/이용기간 관련 질문 특별 처리
+                payment_keywords = ['결제일', '결제일자', '이용기간']
+                is_payment_related = any(keyword in query for keyword in payment_keywords)
                 
+                if is_payment_related and final_docs:
+                    print(f"🎯 결제일/이용기간 관련 질문 감지: {query}")
+                    
+                    # 첫 번째 문서가 테이블 타입이고 결제일/이용기간 정보를 포함하는지 확인
+                    first_doc = final_docs[0]
+                    if (hasattr(first_doc, 'metadata') and 
+                        first_doc.metadata and 
+                        first_doc.metadata.get('type') == 'table'):
+                        
+                        content = first_doc.page_content.lower()
+                        # 결제일/이용기간 관련 테이블 내용인지 확인
+                        table_indicators = ['결제일', '이용기간', '카드사명', '일시불', '할부', '현금서비스']
+                        
+                        if any(indicator in content for indicator in table_indicators):
+                            print(f"✅ 결제일/이용기간 테이블 문서 발견, 첫 번째 문서만 사용")
+                            print(f"   📄 파일명: {first_doc.metadata.get('filename', 'Unknown')}")
+                            print(f"   📊 테이블 컬럼: {first_doc.metadata.get('column', [])}")
+                            print(f"   📃 페이지: {first_doc.metadata.get('page', 'Unknown')}")
+                            
+                            # 첫 번째 문서만 반환
+                            return [first_doc]
+                    
+                    # 첫 번째 문서가 적절하지 않다면 전체 문서에서 검색
+                    for doc in final_docs:
+                        if (hasattr(doc, 'metadata') and 
+                            doc.metadata and 
+                            doc.metadata.get('type') == 'table'):
+                            
+                            content = doc.page_content.lower()
+                            table_indicators = ['결제일', '이용기간', '카드사명', '일시불', '할부', '현금서비스']
+                            
+                            if any(indicator in content for indicator in table_indicators):
+                                print(f"✅ 결제일/이용기간 테이블 문서 발견, 해당 문서만 사용")
+                                print(f"   📄 파일명: {doc.metadata.get('filename', 'Unknown')}")
+                                print(f"   📊 테이블 컬럼: {doc.metadata.get('column', [])}")
+                                print(f"   📃 페이지: {doc.metadata.get('page', 'Unknown')}")
+                                
+                                # 해당 테이블 문서만 반환
+                                return [doc]
+                    
+                    print("⚠️ 적절한 결제일/이용기간 테이블을 찾지 못했습니다. 기존 검색 결과를 사용합니다.")
+
                 # 빈 결과 처리
                 if not final_docs:
                     print("⚠️ 관련성 있는 문서를 찾을 수 없습니다.")
